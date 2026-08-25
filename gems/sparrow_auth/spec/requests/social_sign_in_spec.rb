@@ -247,8 +247,7 @@ RSpec.describe "signing in with a provider", type: :request do
     end
   end
 
-  # The connections screen is the buyer's, written by `rails generate
-  # sparrowkit:screens connections`. What it stands on is here: the identity
+  # The connections screen is the application's, written by the application's own page. What it stands on is here: the identity
   # rows, reached through `current_account.identities`, and the fact that taking
   # one away really does close that way in.
   describe "disconnecting" do

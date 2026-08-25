@@ -7,12 +7,12 @@ require "rails_helper"
 # This used to be spec/requests/otp_sign_in_spec.rb, driving POST /auth/otp
 # against a controller in the engine. That controller is gone: SparrowKit ships
 # no end-user pages, and the sign-in screen is written into the application by
-# `rails generate sparrowkit:screens sign_in`.
+# the application's own page.
 #
 # What did NOT move is the part that matters. Almost none of signing in is about
 # signing in — it is about not answering a question nobody asked, namely whether
 # an address has an account — and every one of those decisions is in
-# SparrowAuth::SignIn, in the engine, precisely so that a buyer cannot get it
+# SparrowAuth::SignIn, in the engine, precisely so that an application cannot get it
 # wrong by writing a page. So these assertions follow the property to where the
 # property lives, and are asked of the service directly.
 #

@@ -220,9 +220,9 @@ RSpec.describe SparrowAuth::Invitation do
   # The screen a person lands on from an invitation email has to show them what
   # they are being invited to before they accept it, and the token is the only
   # thing they arrive holding. `digest` is private, so without a public lookup a
-  # buyer cannot build that page at all.
+  # application cannot build that page at all.
   #
-  # `rails generate sparrowkit:screens invitation` wrote a page calling this for
+  # the application's own page wrote a page calling this for
   # a release in which it did not exist, so the generated screen raised
   # NoMethodError on its first visit.
   describe ".find_by_token" do

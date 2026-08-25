@@ -13,7 +13,7 @@ RSpec.describe "passwords as a flag", type: :request do
   let(:password) { "correct horse battery staple" }
   let(:email) { "person@example.org" }
 
-  # The sign-in screen is the buyer's, so the emailed-code flow is driven
+  # The sign-in screen is the application's, so the emailed-code flow is driven
   # through the service the generated screen calls.
   def request_code(address = email)
     SparrowAuth::SignIn.request(email: address, ip: "203.0.113.51")

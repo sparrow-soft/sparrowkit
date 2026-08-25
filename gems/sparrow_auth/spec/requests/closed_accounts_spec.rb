@@ -81,7 +81,7 @@ RSpec.describe "a closed account", type: :request do
   end
 
   # Driven through SparrowAuth::SignIn rather than over HTTP: the sign-in screen
-  # is the buyer's now, and every decision below is the service's.
+  # is the application's now, and every decision below is the service's.
   describe "the emailed-code sign-in method" do
     let(:ip) { "203.0.113.44" }
 

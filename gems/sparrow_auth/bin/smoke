@@ -471,62 +471,16 @@ end
 
 section "Server"
 
-# The buyer's own sign-in screen, written into the harness before the server
-# starts.
+# The application's own sign-in screen.
 #
-# SparrowKit ships no sign-in page: `rails generate sparrowkit:screens` writes
-# one into the application, and that is the page a person actually meets. This
-# script used to drive /auth/otp, which the engine served until 0.1.0 -- so
-# every check below was exercising a page that no longer exists anywhere.
+# SparrowKit ships no sign-in page. The dummy application here stands in for a
+# host application, so the pages these checks drive are its own -- which is the
+# arrangement a real installation has.
 #
-# Generating it here rather than checking a copy into the harness is the whole
-# point. It means these checks run against the file a buyer gets, from the
-# generator a buyer runs, over real HTTP with CSRF on. The release run that
-# preceded this rewrite found two blockers in exactly that path, both invisible
-# to a suite: a routes file that would not load, and a redirect to a route that
-# does not exist in a new application.
-#
-# Removed again at the end, in an ensure, because it must not be left behind
-# for the next rspec run to autoload.
-GENERATED_SCREENS = %w[sign_in invitation connections].freeze
-
-GENERATED_FILES = [
-  "app/controllers/sign_in_controller.rb", "app/views/sign_in",
-  "app/controllers/invitations_controller.rb", "app/views/invitations",
-  "app/controllers/connections_controller.rb", "app/views/connections"
-].map { |path| SparrowAuth::Engine.root.join("spec/dummy", path) }.freeze
-
-def remove_generated_screen
-  GENERATED_FILES.each { |path| FileUtils.rm_rf(path) }
-end
-
-at_exit { remove_generated_screen }
-
-check "writes the buyer's sign-in screen with sparrowkit:screens" do
-  remove_generated_screen
-
-  require "rails/generators"
-  require "generators/sparrowkit/screens/screens_generator"
-
-  Sparrowkit::Generators::ScreensGenerator.start(
-    GENERATED_SCREENS,
-    destination_root: SparrowAuth::Engine.root.join("spec/dummy"),
-    shell: Thor::Shell::Basic.new
-  )
-
-  missing = GENERATED_FILES.reject { |path| File.exist?(path) }
-  expect!(missing.empty?, "the generator wrote nothing at: #{missing.join(", ")}")
-
-  # The routes file has to LOAD, which is a different question from whether it
-  # holds the right lines -- and the difference was a release blocker. Rails
-  # names an unnamed route after its path, so an unnamed `post "sign-in"` above
-  # a named `get "sign-in"` takes the name and the explicit `as:` collides.
-  Rails.application.reload_routes!
-  expect!(Rails.application.routes.named_routes.names.include?(:sign_in),
-    "the generated routes did not draw a sign_in path")
-
-  "#{GENERATED_SCREENS.join(", ")}: controllers, views and routes that draw"
-end
+# This used to generate them with the application's own page before the
+# server started. That generator was removed in 0.1.0 and this block went on
+# requiring it: dead code that CI could not see, because CI runs this script
+# with --dry-run, which loads it and runs nothing.
 
 require "puma"
 require "puma/configuration"
@@ -1017,7 +971,7 @@ check "lets the verified invitee accept their own invitation" do
   signed_in = Browser.new(BASE)
   signed_in.submit("/auth/login", {login: INVITEE, password: PASSWORD}, form_path: "/auth/login")
 
-  # The invitation page is the buyer's, generated above: the engine stopped
+  # The invitation page is the application's own: the engine stopped
   # serving one in 0.1.0. GET it for the form and its CSRF token, then POST to
   # the same path -- which is what a person does.
   page = signed_in.get("/invitations/#{token}")

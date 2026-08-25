@@ -32,7 +32,7 @@ Rails.application.routes.draw do
   post "passkey-offer/decline", to: "smoke#decline_passkey", as: :decline_passkey
 
   # A page behind SparrowAuth::RequiresLiveSession. The engine's own management
-  # pages are gone — a buyer generates their own — so the concern needs a host
+  # pages are gone — an application generates their own — so the concern needs a host
   # controller to be exercised in, the same way tenancy has widgets below.
   get "account-settings", to: "account_settings#show"
 
@@ -70,7 +70,7 @@ Rails.application.routes.draw do
   get "gated-projects/:id", to: "gated_projects#show"
 
   # For spec/generators/generated_screens_run_spec.rb, which generates the
-  # sign-in screen and drives it with the test helpers a buyer gets. Same
+  # sign-in screen and drives it with the test helpers an application gets. Same
   # reasoning as the ledger route below: declared here rather than drawn inside
   # the spec, because redrawing an application's routes mid-suite runs the
   # reloader and every autoloaded constant another spec file is holding becomes

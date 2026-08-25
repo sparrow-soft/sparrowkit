@@ -10,8 +10,7 @@ require "uri"
 # part somebody can actually use: a session nobody can see is a session nobody
 # will end.
 #
-# The page that shows them is the buyer's now, written by `rails generate
-# sparrowkit:screens sessions`. Two things stayed here, and they are the two
+# The page that shows them is the application's now, written by the application's own page. Two things stayed here, and they are the two
 # that carry the security:
 #
 #   * SparrowAuth::Session, and the fact that every lookup goes through

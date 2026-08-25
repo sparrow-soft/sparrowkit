@@ -187,7 +187,7 @@ RSpec.describe "provisioning hooks", type: :request do
     # password route reaches — it is on `login_session`, which every sign-in
     # method goes through, including the emailed-code screen.
     #
-    # This used to drive that screen over HTTP. The screen is the buyer's now,
+    # This used to drive that screen over HTTP. The screen is the application's now,
     # and the property has split cleanly in two: the examples above prove
     # `login_session` fires the hook, and the generator specs prove the sign-in
     # screen signs people in by calling `login_session` rather than by writing

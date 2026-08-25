@@ -52,26 +52,21 @@ class CreateSparrowAuthOrganizations < ActiveRecord::Migration[7.1]
         foreign_key: {to_table: :sparrow_auth_organizations, on_delete: :cascade},
         index: true
 
-      # The canonical role, not the application's name for it. An application
-      # that calls its admins "managers" configures that; renaming a role stays
-      # a config change rather than a data migration.
+      # A role name the application chose. SparrowKit stores it and never
+      # interprets it: there is no ladder here and no notion of one role
+      # outranking another.
       #
-      # There is deliberately no check constraint listing the roles. A list of
-      # names in the schema can only ever hold the roles that existed the day it
-      # was written, so an application declaring one of its own — an Accountant
-      # who reaches billing and nothing else — would fail at the moment somebody
-      # was given the role rather than at the moment it was declared, and adding
-      # a role would become a deploy.
+      # There is deliberately no check constraint listing the roles, and nothing
+      # anywhere that enumerates them. A list of names in the schema can only
+      # ever hold the roles that existed the day it was written, so an
+      # application declaring one of its own -- an Accountant who reaches
+      # billing and nothing else -- would fail at the moment somebody was given
+      # the role rather than when it was declared, and adding a role would
+      # become a deploy.
       #
-      # What enforces it instead is SparrowAuth::Membership, which casts through
-      # SparrowAuth::Role on the way in and refuses a value no role claims. It
-      # also fails closed on the way out: a role nothing declares reads back as
-      # nil, which grants nothing, rather than being taken for the weakest role
-      # on the ladder.
-      #
-      # What is lost is real and worth naming: something writing to this table
-      # around the model can store a role nobody declared. What is gained is
-      # that a role somebody declared can actually be stored.
+      # What that costs is real and worth naming: this column will hold any
+      # string, so a typo is storable. What it buys is that deciding what a role
+      # means stays in the application, where the only code that knows lives.
       t.string :role, null: false
 
       t.timestamps

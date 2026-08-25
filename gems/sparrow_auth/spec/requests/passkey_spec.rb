@@ -32,7 +32,7 @@ RSpec.describe "passkeys", type: :request do
 
   # Asked of a page behind SparrowAuth::RequiresLiveSession, which is what a
   # generated passkey screen is guarded by. It used to be the engine's own
-  # /auth/passkeys; that page is the buyer's now, and this is the dummy
+  # /auth/passkeys; that page is the application's now, and this is the dummy
   # application's equivalent.
   def signed_in?
     get "/account-settings"
@@ -217,8 +217,7 @@ RSpec.describe "passkeys", type: :request do
     end
   end
 
-  # The management screen is the buyer's, written by `rails generate
-  # sparrowkit:screens passkeys`. What it is written on top of is here: the
+  # The management screen is the application's, written by the application's own page. What it is written on top of is here: the
   # credential rows, reached through `current_account.webauthn_credentials`, so
   # that somebody else's passkey is not in the set rather than found and then
   # refused. That the generated screen reaches them that way is asserted where

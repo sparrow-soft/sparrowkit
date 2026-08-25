@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 # A host application's own account page, guarded the way SparrowKit tells a
-# buyer to guard one.
+# host application to guard one.
 #
 # The engine used to ship three of these — sessions, passkeys, connections —
 # and they were where SparrowAuth::RequiresLiveSession was exercised. The pages
-# are the buyer's now, written by `rails generate sparrowkit:screens`, and every
+# are the application's now, the application's own, and every
 # one of them opens by including this concern. The concern itself stayed in the
 # engine, so this is the host controller that exercises it: one page, doing
 # nothing, behind the guard.

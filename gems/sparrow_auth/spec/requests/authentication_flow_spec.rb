@@ -50,8 +50,8 @@ RSpec.describe "the authentication flow", type: :request do
 
     # The rule, stated as a test. SparrowKit ships no end-user pages, so the
     # engine draws no routes at all — the sign-in screen, the invitation
-    # landing page and the three account pages are the buyer's, written by
-    # `rails generate sparrowkit:screens`.
+    # landing page and the three account pages are the application's, written by
+    # the application's own page.
     #
     # Rodauth's routes are unaffected by that and are checked above: they come
     # from Roda middleware sitting above the Rails router, at

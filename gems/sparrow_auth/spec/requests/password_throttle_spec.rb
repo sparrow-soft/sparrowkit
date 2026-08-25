@@ -126,7 +126,7 @@ RSpec.describe "guessing a password", type: :request do
 
   # The point of throttling the path rather than the account.
   describe "the other sign-in methods, while the password path is throttled" do
-    # Driven through SparrowAuth::SignIn, which is what the buyer's sign-in
+    # Driven through SparrowAuth::SignIn, which is what the application's sign-in
     # screen calls: the budgets are keyed per bucket, so spending the password
     # budget must leave the code budget untouched.
     it "still signs in with an emailed code" do

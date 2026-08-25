@@ -3,14 +3,13 @@
 # Nothing.
 #
 # SparrowKit serves no end-user pages. The screens your customers look at carry
-# your navigation, your styling and your words, so they are yours -- generated
-# into your application by `rails generate sparrowkit:screens` and owned by you
-# from the moment they land.
+# your navigation, your styling and your words, so they are yours to write --
+# against the models in this gem, which is all it offers.
 #
 # What used to be here: sign-in, the emailed-code pages, passkey management,
 # active sessions, connected providers, invitation acceptance, and a member
-# admin area. Every one of them is something the generator now writes into your
-# app, wired to the same models.
+# admin area. There is no generator that writes them for you either; every one
+# of them is a page you write, wired to the same models.
 #
 # Rodauth's own routes -- login, logout, create-account, verify-account, the
 # passkey ceremony -- are unaffected by this file. They are served by Roda

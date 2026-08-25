@@ -212,16 +212,17 @@ RSpec.describe "the schema" do
 
   # Kept from the spec this replaces, and still the cheapest check here.
   #
-  # `ActiveRecord::Migration[8.0]` is not a version number, it is a demand:
-  # Rails raises `Unknown migration version "8.0"` on any Rails that has never
-  # heard of it. A migration written on Rails 8 and shipped in a gem whose
-  # gemspec says `>= 7.1` therefore cannot run at all for a buyer on 7.2 -- and
-  # it fails at install time, on the first command they type after paying.
+  # `ActiveRecord::Migration[8.1]` is not a version number, it is a demand:
+  # Rails raises `Unknown migration version "8.1"` on any Rails that has never
+  # heard of it. A migration written on the newest Rails and shipped in a gem
+  # whose gemspec admits an older one cannot run at all for somebody on that
+  # older Rails -- and it fails at install time, on their first command.
   #
-  # Nothing else in this repository could catch that, because every dummy
-  # application runs the newest Rails. Four migrations had drifted to `[8.0]`
-  # and were found only by installing the bundle into a real Rails 7.2
-  # application by hand.
+  # The floor is read from the gemspec below rather than written here, so this
+  # follows when the gemspec moves. Nothing else in this repository could catch
+  # the drift, because every dummy application runs the newest Rails. Four
+  # migrations had drifted once and were found only by installing the bundle
+  # into a real application on the floor version by hand.
   describe "the Rails version each migration demands" do
     def gemspec_rails_floor
       spec = Gem::Specification.load(SparrowAuth::Engine.root.join("sparrow_auth.gemspec").to_s)
@@ -251,7 +252,7 @@ RSpec.describe "the schema" do
 
           #{offenders.join("\n  ")}
 
-        Rails raises "Unknown migration version" rather than degrading, so a buyer on
+        Rails raises "Unknown migration version" rather than degrading, so somebody on
         #{floor} cannot install at all. Declare ActiveRecord::Migration[#{floor}] unless the
         migration genuinely needs newer behaviour -- in which case raise the gemspec floor
         instead, and say so.

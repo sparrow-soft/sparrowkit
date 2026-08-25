@@ -76,29 +76,31 @@ REMOVED_APIS = {
   "organization.billing." => "there is no billing object; ask Pay"
 }.freeze
 
-# Everything a developer or an agent reads: prose, generator templates, and the
-# console's own pages.
+# Everything a developer or an agent reads, taken from the gemspecs themselves.
 #
-# The .erb matters and was missing at first. Two shipped console panels told
-# people to call `require_organization!(permission: "billing:read")` for two
-# releases after that method was deleted -- in the UI they actually open, which
-# is the worst possible place for it -- and this check globbed only .md and .tt,
-# so it saw neither. A documentation check that does not read the documentation
-# people look at is a check that passes for the wrong reason.
+# ASK THE GEMSPEC. Do not list directories here.
 #
-# This repository's own spec/ is excluded: the list of forbidden names lives
-# there, so it would flag itself.
-def shipped_documents
-  prose = Dir.glob(File.join(ROOT, "**", "*.{md,tt,erb}"))
-  # Shipped Ruby, for the comments in it. NOT specs: a spec that asserts an API
-  # is gone has to name it, and would flag itself forever.
-  code = GEMS.flat_map do |gem|
-    %w[lib app console].flat_map { |dir| Dir.glob(File.join(ROOT, "gems", gem, dir, "**", "*.rb")) }
-  end
+# This has now been wrong twice, the same way both times. It began as *.{md,tt},
+# which missed the .erb the console panels are written in -- so two shipped
+# panels told people to call a deleted method for two releases. Widening it to
+# lib/app/console then missed config/, where a shipped routes.rb was still
+# describing a deleted generator. Each fix widened the net to wherever the last
+# fault was found, which is not the same as covering what ships.
+#
+# `spec.files` is the definition of what ships: it is the list RubyGems packages
+# and the list a developer installs. Reading it means a new directory added to a
+# gemspec is covered the moment it is added, by nobody's remembering.
+#
+# It also excludes each gem's spec/ for free, which is what we want: a spec that
+# asserts an API is gone has to name it, and would otherwise flag itself.
+TEXT_FILE = /\.(rb|erb|tt|md)\z/
 
-  (prose + code).reject do |path|
-    path.include?("/vendor/") || path.include?("/tmp/") ||
-      path.include?("/node_modules/") || path.include?("/spec/") ||
-      path.start_with?(File.join(ROOT, "spec"))
-  end
+def shipped_documents
+  @shipped_documents ||= GEMS.flat_map { |gem|
+    dir = File.join(ROOT, "gems", gem)
+    spec = Dir.chdir(dir) { Gem::Specification.load("#{gem}.gemspec") }
+    raise "could not load #{gem}.gemspec" if spec.nil?
+
+    spec.files.grep(TEXT_FILE).map { |relative| File.join(dir, relative) }
+  } + Dir.glob(File.join(ROOT, "*.md"))
 end
