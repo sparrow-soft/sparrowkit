@@ -96,8 +96,6 @@ RSpec.describe "the documentation" do
   #
   # Whenever these gems are published, this check is the thing to delete.
   describe "the install instructions" do
-    GIT_SOURCE = 'git "https://github.com/sparrow-soft/sparrowkit.git"'
-
     def documents_declaring_a_gem
       shipped_documents.select { |path|
         path.end_with?(".md") && read_utf8(path).match?(/^\s*gem "sparrow_/)

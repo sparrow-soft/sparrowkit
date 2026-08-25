@@ -111,3 +111,7 @@ end
 def shipped_documents
   shipped_files + Dir.glob(File.join(ROOT, "*.md"))
 end
+
+# The git source every install snippet has to carry while the gems are
+# unpublished. See spec/docs_spec.rb.
+GIT_SOURCE = 'git "https://github.com/sparrow-soft/sparrowkit.git"'
