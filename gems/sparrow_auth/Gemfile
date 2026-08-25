@@ -23,7 +23,7 @@ group :development, :test, :smoke do
   # Both supported databases, so the suite can run against either --
   # DB=sqlite swaps the dummy application onto SQLite.
   gem "sqlite3", ">= 2.0"
-  gem "rspec-rails", "~> 7.0"
+  gem "rspec-rails", "~> 8.0"
   gem "standard", "~> 1.44"
 
   # The dummy application the engine mounts into runs a real Rails stack against
