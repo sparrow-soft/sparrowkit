@@ -22,12 +22,24 @@ development group — it is the control panel, and it must never be in
 production:
 
 ```ruby
-gem "sparrow_auth"   # passkeys, organizations, invitations
-gem "sparrow_mail"   # transactional and marketing email
-gem "sparrow_pay"    # subscription billing
+# Gemfile
+#
+# Not on RubyGems yet, so the gems come from the repository. One `git` block for
+# all four: Bundler fetches the repository once, and `tag:` pins you to a
+# release rather than to whatever `main` holds today.
+#
+# Comment out the modules you do not want. What you cannot do is take one on its
+# own from RubyGems -- sparrow_auth depends on exactly this version of
+# sparrow_mail, and sparrow_pay on exactly this version of sparrow_auth, so
+# every gem in the chain has to come from the same source.
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.1", glob: "gems/*/*.gemspec" do
+  gem "sparrow_auth"   # passkeys, organizations, invitations
+  gem "sparrow_mail"   # transactional and marketing email
+  gem "sparrow_pay"    # subscription billing
 
-group :development do
-  gem "sparrow_ui"   # the control panel at /sparrowkit
+  group :development do
+    gem "sparrow_ui"   # the control panel at /sparrowkit; never in production
+  end
 end
 ```
 
@@ -41,6 +53,11 @@ That mounts each engine in your routes, mounts the control panel at
 `/sparrowkit`, copies each module's database tables in and applies them, and
 tells you what it changed. It is safe to run again — a second run adds nothing
 and says so.
+
+**`sparrowkit:install` comes from `sparrow_ui`.** If you are not taking the
+control panel, use the module's own task instead — `bin/rails
+sparrow_mail:install`, `sparrow_auth:install` or `sparrow_pay:install`. Each
+does the same work for its own module.
 
 Installing one module on its own works the same way:
 

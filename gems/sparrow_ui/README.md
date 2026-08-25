@@ -13,13 +13,20 @@ about who may reach it.
 Nothing to install. It arrives with the other modules and mounts itself at
 `/sparrowkit` when the installer runs.
 
-It belongs in your **development group**, which is where the template puts it:
+It belongs in your **development group**, and must never be outside it:
 
 ```ruby
-group :development do
-  gem "sparrow_ui"
+# Gemfile -- not on RubyGems yet, so it comes from the repository
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.1", glob: "gems/*/*.gemspec" do
+  group :development do
+    gem "sparrow_ui"
+  end
 end
 ```
+
+`sparrow_ui` is where the `sparrowkit:install` task lives. Without it in the
+Gemfile that command does not exist, and each module is installed with its own:
+`bin/rails sparrow_mail:install`, `sparrow_auth:install`, `sparrow_pay:install`.
 
 ## Using it
 

@@ -86,6 +86,53 @@ RSpec.describe "the documentation" do
     end
   end
 
+  # The install instructions, against what Bundler can actually resolve.
+  #
+  # SparrowKit is not on RubyGems, and the gems pin each other to an exact
+  # version, so a bare `gem "sparrow_auth"` cannot resolve: Bundler goes looking
+  # for `sparrow_mail = 1.0.1` on rubygems.org and does not find it. Every
+  # README showed that bare form, which meant the first thing anybody tried
+  # after landing on the repository failed.
+  #
+  # Whenever these gems are published, this check is the thing to delete.
+  describe "the install instructions" do
+    GIT_SOURCE = 'git "https://github.com/sparrow-soft/sparrowkit.git"'
+
+    def documents_declaring_a_gem
+      shipped_documents.select { |path|
+        path.end_with?(".md") && read_utf8(path).match?(/^\s*gem "sparrow_/)
+      }
+    end
+
+    it "never shows a bare gem line while the gems are unpublished" do
+      expect(documents_declaring_a_gem).not_to be_empty,
+        "no install snippets found — has the scan broken?"
+
+      bare = documents_declaring_a_gem.reject { |path| read_utf8(path).include?(GIT_SOURCE) }
+        .map { |path| path.delete_prefix("#{ROOT}/") }
+
+      expect(bare).to be_empty,
+        "#{bare.join(", ")} declares a sparrow gem without the git source. " \
+        "That Gemfile cannot resolve: the gems are not on RubyGems and pin " \
+        "each other exactly."
+    end
+
+    it "pins the tag to the version being released" do
+      version = read_utf8(File.join(ROOT, "VERSION")).strip
+
+      wrong = documents_declaring_a_gem.filter_map { |path|
+        tag = read_utf8(path)[/tag: "v([0-9.]+)"/, 1]
+        next if tag.nil? || tag == version
+
+        "#{path.delete_prefix("#{ROOT}/")} pins v#{tag}"
+      }
+
+      expect(wrong).to be_empty,
+        "#{wrong.join(", ")}, but VERSION says #{version}. " \
+        "The install snippets pin a release; bump them with the version."
+    end
+  end
+
   # The versions a README promises, against the versions the gemspecs require.
   #
   # These drifted silently: the gemspecs moved to Ruby 3.2 and Rails 8.1 while

@@ -45,16 +45,31 @@ about.
 
 ## Installing
 
+SparrowKit is **not on RubyGems**. The gems come from the repository, and they
+pin each other to an exact version -- `sparrow_auth` requires exactly this
+version of `sparrow_mail`, `sparrow_pay` exactly this version of `sparrow_auth`
+-- so every gem in the chain has to come from the same source. A bare
+`gem "sparrow_auth"` fails to resolve.
+
+One `git` block does all of it. The `glob:` is what lets Bundler resolve the
+gems you did not list but depend on, and `tag:` pins you to a release rather
+than to whatever `main` holds today:
+
 ```ruby
 # Gemfile
-gem "sparrow_auth"
-gem "sparrow_mail"
-gem "sparrow_pay"
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.1", glob: "gems/*/*.gemspec" do
+  gem "sparrow_auth"
+  gem "sparrow_mail"
+  gem "sparrow_pay"
 
-group :development do
-  gem "sparrow_ui"   # the control panel; never in production
+  group :development do
+    gem "sparrow_ui"   # the control panel; never in production
+  end
 end
 ```
+
+Comment out the modules you do not want; taking one alone works, because the
+glob resolves whatever it depends on from the same source.
 
 ```bash
 bin/rails sparrowkit:install
@@ -62,8 +77,11 @@ bin/rails sparrowkit:install
 
 That mounts each engine, mounts the control panel at `/sparrowkit`, copies each
 module's migrations in and applies them. Safe to run again — a second run adds
-only what is missing. Installing one module alone works the same way:
-`bin/rails sparrow_mail:install`.
+only what is missing.
+
+**`sparrowkit:install` comes from `sparrow_ui`.** Without the control panel in
+the Gemfile that task does not exist; install each module with its own instead:
+`bin/rails sparrow_mail:install`, `sparrow_auth:install`, `sparrow_pay:install`.
 
 Settings live in Rails encrypted credentials under `sparrow_auth:` and
 `sparrow_mail:`. Read them with `bin/rails credentials:edit`. Never hardcode
