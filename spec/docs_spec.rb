@@ -133,8 +133,10 @@ RSpec.describe "the documentation" do
     REMOVED_APIS.each do |api, why|
       it "does not teach #{api}" do
         offenders = shipped_documents.select { |path|
-          # AGENTS.md names these on purpose, in the table saying they are gone.
-          next false if File.basename(path) == "AGENTS.md"
+          # Two files name these on purpose and must be allowed to. AGENTS.md
+          # has the table saying they are gone, and a CHANGELOG cannot record
+          # that something was removed without naming the thing removed.
+          next false if %w[AGENTS.md CHANGELOG.md].include?(File.basename(path))
 
           read_utf8(path).include?(api)
         }.map { |path| path.delete_prefix("#{ROOT}/") }

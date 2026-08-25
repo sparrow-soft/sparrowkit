@@ -4,5 +4,5 @@
 # bump VERSION and run `rake version:sync`. All SparrowKit gems release in
 # lockstep. See docs/decisions/0007-monorepo-of-gems-with-lockstep-versioning.md
 module SparrowUi
-  VERSION = "1.0.0"
+  VERSION = "1.0.1"
 end
