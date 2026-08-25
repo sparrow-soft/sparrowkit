@@ -21,7 +21,7 @@
 # sign-in works, and the first thing to keep passing after sign-in breaks.
 #
 # THE SCREEN IT DRIVES IS YOURS. SparrowKit serves no sign-in page; the one it
-# posts to is the one `rails generate sparrowkit:screens sign_in` wrote into
+# posts to is the one the application wrote into
 # your application, at /sign-in. That is the point rather than an inconvenience
 # — every test that signs in is now also a test that your sign-in screen works.
 # If you moved the screen, set SparrowAuth.config.sign_in_path to wherever it
@@ -86,9 +86,8 @@ module SparrowAuth
       rescue ActionController::RoutingError
         raise SparrowAuth::Error,
           "nothing is routed at #{path}, so there is no sign-in screen to sign " \
-          "in through. SparrowKit does not ship one — run " \
-          "`rails generate sparrowkit:screens sign_in` to write yours, or set " \
-          "SparrowAuth.config.sign_in_path if you have already moved it."
+          "in through. SparrowKit ships no sign-in page — write one, or point " \
+          "SparrowAuth.config.sign_in_path at Rodauth's own at /auth/login."
       end
 
       # The two ways this fails are worth telling apart on sight, because both

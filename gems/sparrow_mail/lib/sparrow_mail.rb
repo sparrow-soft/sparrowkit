@@ -250,7 +250,7 @@ module SparrowMail
     end
 
     # One message, read back, whichever store it landed in.
-    Readback = Struct.new(:to, :subject, :text, keyword_init: true)
+    Readback = Struct.new(:to, :subject, :text)
 
     # What this application has sent and can still read.
     #

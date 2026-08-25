@@ -208,15 +208,18 @@
       decided by the role somebody holds in that organization.
     </p>
     <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
-      In your own controller, where you can read and test it:
+      SparrowKit stores role names and never interprets them, so there is no
+      permission API to call. Write the rule in your own controller, where you
+      can read and test it:
     </p>
-    <pre class="mt-2 overflow-x-auto rounded-md bg-slate-100 px-3 py-2 font-mono text-xs text-slate-800 dark:bg-slate-800 dark:text-slate-200"><code>require_organization!(permission: "billing:read")
-require_organization!(permission: "billing:manage")</code></pre>
+    <pre class="mt-2 overflow-x-auto rounded-md bg-slate-100 px-3 py-2 font-mono text-xs text-slate-800 dark:bg-slate-800 dark:text-slate-200"><code>before_action :require_billing_admin
+
+def require_billing_admin
+  head :forbidden unless current_account&amp;.role_in(current_organization) == "owner"
+end</code></pre>
     <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
-      Both permissions ship: <code class="font-mono">billing:read</code> is held from
-      admin upwards and <code class="font-mono">billing:manage</code> by owners.
-      Reading which plan you are on and changing the card are deliberately not
-      the same permission.
+      Worth separating the two questions in whatever rule you write: reading
+      which plan you are on and changing the card are rarely the same decision.
     </p>
   </section>
 
@@ -282,7 +285,7 @@ require_organization!(permission: "billing:manage")</code></pre>
   <li>
     <span class="font-medium">What a plan unlocks</span> &mdash; your processor has never heard of
     your feature names. Ask
-    <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">organization.billing.active?</code>
+    <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">organization.payment_processor.subscription</code>
     and gate on it yourself.
   </li>
   <li>

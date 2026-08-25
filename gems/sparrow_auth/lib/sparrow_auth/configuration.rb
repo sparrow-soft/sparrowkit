@@ -28,7 +28,7 @@ module SparrowAuth
     # by an emailed code.
     #
     # The engine cannot know the path, because the screen is yours: it is
-    # written into your application by `rails generate sparrowkit:screens`.
+    # written into your application by you. SparrowKit ships no screens.
     # The default is what that generator draws. Change this if you move it, and
     # the two links follow.
     #

@@ -52,7 +52,7 @@ module SparrowMail
       STAMP = "%Y%m%dT%H%M%S%6N"
 
       # One message, as the panel reads it back.
-      Message = Struct.new(:path, :at, :to, :subject, :text, keyword_init: true)
+      Message = Struct.new(:path, :at, :to, :subject, :text)
 
       class << self
         # Nothing to be sandboxed from. Saying true keeps the behaviour

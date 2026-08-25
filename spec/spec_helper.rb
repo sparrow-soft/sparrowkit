@@ -76,7 +76,29 @@ REMOVED_APIS = {
   "organization.billing." => "there is no billing object; ask Pay"
 }.freeze
 
+# Everything a developer or an agent reads: prose, generator templates, and the
+# console's own pages.
+#
+# The .erb matters and was missing at first. Two shipped console panels told
+# people to call `require_organization!(permission: "billing:read")` for two
+# releases after that method was deleted -- in the UI they actually open, which
+# is the worst possible place for it -- and this check globbed only .md and .tt,
+# so it saw neither. A documentation check that does not read the documentation
+# people look at is a check that passes for the wrong reason.
+#
+# This repository's own spec/ is excluded: the list of forbidden names lives
+# there, so it would flag itself.
 def shipped_documents
-  Dir.glob(File.join(ROOT, "**", "*.{md,tt}"))
-    .reject { |p| p.include?("/vendor/") || p.include?("/tmp/") || p.include?("/node_modules/") }
+  prose = Dir.glob(File.join(ROOT, "**", "*.{md,tt,erb}"))
+  # Shipped Ruby, for the comments in it. NOT specs: a spec that asserts an API
+  # is gone has to name it, and would flag itself forever.
+  code = GEMS.flat_map do |gem|
+    %w[lib app console].flat_map { |dir| Dir.glob(File.join(ROOT, "gems", gem, dir, "**", "*.rb")) }
+  end
+
+  (prose + code).reject do |path|
+    path.include?("/vendor/") || path.include?("/tmp/") ||
+      path.include?("/node_modules/") || path.include?("/spec/") ||
+      path.start_with?(File.join(ROOT, "spec"))
+  end
 end

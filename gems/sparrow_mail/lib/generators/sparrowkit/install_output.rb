@@ -165,12 +165,10 @@ module Sparrowkit
       steps = []
       steps << "cd #{app_directory}" if fresh_app?
 
-      # The screens step is not optional and is not a suggestion. SparrowKit
-      # serves no sign-in page -- every page a customer looks at is generated
-      # into the application and owned by it -- so an install that stopped at
-      # "run the server" left somebody with an application nobody can sign in
-      # to and nothing on screen saying why. That was true for one release.
-      steps << "run bin/rails generate sparrowkit:screens to write your sign-in and account pages"
+      # Saying where sign-in lives is not optional. SparrowKit ships no sign-in
+      # page of its own, so an install that stopped at "run the server" left
+      # somebody looking for one with nothing on screen saying where it is.
+      steps << "sign in at /auth/login, which Rodauth serves; the pages your customers see are yours to write"
       steps << "run bin/rails server"
       steps << "open http://localhost:3000/sparrowkit in your browser"
 

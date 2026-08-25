@@ -24,10 +24,9 @@ module SparrowPay
     # to protect pages that no longer existed, warning in amber that until it was
     # filled in "the billing pages refuse everybody".
     #
-    # Who may see and change billing is now the same question as everything
-    # else: `require_organization!(permission: "billing:manage")` in the
-    # application's own controller, against the membership the request belongs
-    # to. See sparrow_auth's Authorization concern.
+    # Who may see and change billing is the application's own rule, written in
+    # its own controller against the role the membership holds. SparrowKit
+    # stores role names and never interprets them, so it cannot decide this.
 
     # Which processor an organization gets when it first needs one.
     #

@@ -24,7 +24,7 @@ module SparrowUi
     # chat window, which is the single worst destination for an API key on this
     # entire console. Modules say a key is set; they never say what it is. The
     # spec for this asserts it, and it is worth keeping asserted.
-    Guide = Struct.new(:steps, :brief, keyword_init: true)
+    Guide = Struct.new(:steps, :brief)
 
     class Guide
       def self.none = new(steps: [], brief: nil)

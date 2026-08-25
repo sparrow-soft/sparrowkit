@@ -11,7 +11,7 @@ module SparrowUi
     #
     # A module builds one however it likes -- sparrow_mail's comes from its own
     # Console::Report, which knows things a form does not.
-    Status = Struct.new(:state, :detail, keyword_init: true)
+    Status = Struct.new(:state, :detail)
 
     # Reopened rather than written as a block on the line above, because the
     # constants below are constants: defining one inside a `Struct.new do ... end`

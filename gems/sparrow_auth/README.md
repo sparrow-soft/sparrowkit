@@ -17,12 +17,13 @@ to do what, the pages themselves, and the wiring in between.
 **What is here:** accounts; email verification that cannot be switched off;
 signing in with a code sent by email; passkeys; signing in with Google or Apple;
 passwords, which are off unless you turn them on; shared accounts and the people
-in them; keeping one customer's records away from another's; deciding who may do
-what; a page where somebody can see every browser they are signed in on and end
-any of them; API tokens; ready-made admin pages; and generators that write the
-tedious parts for you.
+in them; invitations; and keeping one customer's records away from another's.
 
-Part of [SparrowKit](../../README.md). Needs Ruby 3.1 or newer, Rails 7.1 or
+**What is not:** any page a customer of yours looks at, and any opinion about
+what a role may do. Rodauth serves its own pages under `/auth`; everything else
+is yours to write, and authorization is ordinary Ruby in your application.
+
+Part of [SparrowKit](../../README.md). Needs Ruby 3.2 or newer, Rails 8.1 or
 newer, and either PostgreSQL 12 or newer, or SQLite 3.9 or newer.
 
 ---
@@ -385,16 +386,15 @@ styling and your words.
 
 ## Making the pages yours
 
-The sign-in pages arrive in a plain look carrying no branding. Change the
-colours at `/sparrowkit/auth`, under *Theme the sign-in pages*, or replace
-`app/views/layouts/sparrow_auth/_tokens.html.erb` with your own copy.
+Rodauth's pages render through `SparrowAuth::RodauthController`, which sets
+`layout "application"` -- your application's own layout, so they arrive already
+wrapped in your header, footer and styling. There is nothing to theme here and
+no stylesheet of ours to override.
 
-To wrap the pages in your site's header and footer, put your own
-`app/views/layouts/sparrow_auth/application.html.erb` in your application. Five
-things in ours are doing real work and each fails silently if dropped —
-`csrf_meta_tags`, the page heading, the two flash message lines, the rule hiding
-Rodauth's script-driven fields, and `yield`. Copy ours and edit it rather than
-starting from scratch.
+`bin/rails generate rodauth:views` copies Rodauth's templates into your
+application when you want to change the markup itself. Point
+`config.rails_controller` at a controller of your own if you want your
+before_actions on those pages too.
 
 ## Keeping two tables from growing forever
 

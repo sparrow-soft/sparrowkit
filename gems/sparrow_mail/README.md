@@ -17,7 +17,7 @@ Each of those is called an **adapter** — the small piece of code that knows ho
 to talk to one company. You pick one by name (`adapter: :postmark`) and never
 think about it again.
 
-Part of [SparrowKit](../../README.md). Needs Ruby 3.1 or newer.
+Part of [SparrowKit](../../README.md). Needs Ruby 3.2 or newer.
 
 ---
 

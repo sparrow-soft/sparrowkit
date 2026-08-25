@@ -86,6 +86,46 @@ RSpec.describe "the documentation" do
     end
   end
 
+  # The versions a README promises, against the versions the gemspecs require.
+  #
+  # These drifted silently: the gemspecs moved to Ruby 3.2 and Rails 8.1 while
+  # both READMEs still said 3.1 and 7.1, so a developer checking whether they
+  # could use SparrowKit got the wrong answer from the only file they would
+  # think to read.
+  describe "the versions a README promises" do
+    def gemspec_for(gem)
+      read_utf8(File.join(ROOT, "gems", gem, "#{gem}.gemspec"))
+    end
+
+    GEMS.each do |gem|
+      readme_path = File.join("gems", gem, "README.md")
+
+      it "#{readme_path} agrees with the gemspec about Ruby" do
+        readme = read_utf8(File.join(ROOT, readme_path))
+        claimed = readme[/Needs Ruby (\d+\.\d+)/, 1]
+        next if claimed.nil?
+
+        required = gemspec_for(gem)[/required_ruby_version = ">= (\d+\.\d+)"/, 1]
+
+        expect(claimed).to eq(required),
+          "#{readme_path} says Ruby #{claimed}, the gemspec requires #{required}."
+      end
+
+      it "#{readme_path} agrees with the gemspec about Rails" do
+        readme = read_utf8(File.join(ROOT, readme_path))
+        claimed = readme[/Rails (\d+\.\d+) or\s*\n?newer/, 1] || readme[/Rails (\d+\.\d+) or newer/, 1]
+        next if claimed.nil?
+
+        spec = gemspec_for(gem)
+        required = spec[/add_dependency "(?:rails|railties)", ">= (\d+\.\d+)"/, 1]
+        next if required.nil?
+
+        expect(claimed).to eq(required),
+          "#{readme_path} says Rails #{claimed}, the gemspec requires #{required}."
+      end
+    end
+  end
+
   # What actually went wrong before: a README kept teaching an API after the
   # code went. These names are removed for good, so any shipped document naming
   # one is out of date by definition.

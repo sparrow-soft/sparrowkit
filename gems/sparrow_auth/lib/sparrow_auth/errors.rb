@@ -54,20 +54,10 @@ module SparrowAuth
     end
   end
 
-  # An API token was refused. Absent, wrong, revoked, expired, issued for a
-  # different app, or belonging to an account that is no longer usable: all one
-  # error with one message, because telling a caller which wall they hit tells
-  # them whether the token they presented is a real one.
-  class InvalidApiToken < AccessError
-    def initialize(message = "That token is not valid")
-      super
-    end
-  end
-
   # The account is not a member of the organization in question, or its role
   # there does not reach what the action requires.
   #
-  # Every refusal inside require_organization! is this one error with this one
+  # Every refusal about membership is this one error with this one
   # message: signed out, no organization in scope, no membership, a membership
   # whose stored role is not one we recognise, and a membership that simply does
   # not reach. Telling somebody which of those it was tells them whether the

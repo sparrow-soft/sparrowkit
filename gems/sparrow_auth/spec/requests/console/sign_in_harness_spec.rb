@@ -161,21 +161,22 @@ RSpec.describe "signing in from the auth panel", type: :request do
       expect(response.body).to include("sparrow_auth:seed")
     end
 
-    # The dead end Phase 1f created at the other end: an application that has
-    # not run the generator has nowhere for anybody to sign in, and the symptom
-    # is a 404 at a path nobody wrote.
+    # An application that has not written a sign-in page has nowhere for anybody
+    # to sign in, and the symptom is a 404 at a path nobody wrote. The panel says
+    # so, and points at the one page that does exist: Rodauth's own.
     it "says so when the application has no sign-in screen of its own" do
       allow(SparrowAuth.config).to receive(:sign_in_path).and_return("/nothing-is-here")
 
       get "/sparrowkit/auth"
 
-      expect(response.body).to include("sparrowkit:screens")
+      expect(response.body).to include("/auth/login")
+      expect(response.body).to include("has no sign-in page yet")
     end
 
-    it "stays quiet about that once the screens exist" do
+    it "stays quiet about that once a sign-in page exists" do
       get "/sparrowkit/auth"
 
-      expect(response.body).not_to include("sparrowkit:screens")
+      expect(response.body).not_to include("has no sign-in page yet")
     end
   end
 end

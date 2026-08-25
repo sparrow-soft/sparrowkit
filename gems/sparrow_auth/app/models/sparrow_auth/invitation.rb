@@ -139,7 +139,7 @@ module SparrowAuth
       # only thing they arrive holding. `digest` is private and should stay
       # that way, so without this a buyer cannot make that page at all.
       #
-      # `rails generate sparrowkit:screens invitation` wrote a page calling this
+      # An application's own acceptance page calls this
       # method for a release in which it did not exist, so the generated screen
       # raised NoMethodError on its first visit. Caught by bin/smoke driving the
       # generated pages rather than the engine's deleted ones.

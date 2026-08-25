@@ -23,9 +23,10 @@
 </p>
 <p class="mt-2 text-base text-slate-600 dark:text-slate-300">
   This page is about getting people <em>in</em>. What they are allowed to do once they are in is
-  decided by your own code &mdash; by the organization role somebody holds, asked with
-  <code class="rounded bg-slate-100 px-1 py-0.5 text-sm dark:bg-slate-800">require_organization!(at_least: :admin)</code>
-  in your controllers. There is nothing to set here.
+  decided by your own code. A role is a name SparrowKit stores and never interprets, so compare it
+  yourself &mdash;
+  <code class="rounded bg-slate-100 px-1 py-0.5 text-sm dark:bg-slate-800">current_account.role_in(current_organization)</code>
+  &mdash; in your controllers. There is nothing to set here.
 </p>
 <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
   Everything on this page is written to
@@ -823,8 +824,8 @@
     <p class="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
       Nothing is routed at <code class="font-mono"><%= SparrowAuth.config.sign_in_path %></code>,
       so your application has no sign-in page yet &mdash; SparrowKit does not ship one.
-      Run <code class="font-mono">bin/rails generate sparrowkit:screens</code> to write yours.
-      This harness works either way; your users need that command.
+      Rodauth serves its own at <code class="font-mono">/auth/login</code>; a page carrying your
+      own navigation and words is yours to write. This harness works either way.
     </p>
   <% end %>
 

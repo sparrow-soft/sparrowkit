@@ -19,13 +19,12 @@ require_relative "sparrow_pay/engine" if defined?(Rails)
 # Products, prices, plan names and what they cost are configured at the
 # processor, because that is where a developer already configures them. What a
 # plan unlocks is the application's business, because Paddle has never heard of
-# your feature names. So this gem answers two questions and does not have
-# opinions beyond them:
+# your feature names. So this gem decides who the customer is and stops:
 #
-#   Is this organization paid up?   organization.billing.active?
-#   What are they on?               organization.billing.plan
+#   Who is billed?     the organization, never a person
+#   Everything else?   Pay -- organization.payment_processor
 #
-# An application gates on those. It is not this gem's place to decide what
+# An application asks Pay directly. It is not this gem's place to decide what
 # "growth" means, and a version of it that did meant declaring every plan twice.
 #
 # Pay owns everything below: the API calls, webhook ingestion and verification,

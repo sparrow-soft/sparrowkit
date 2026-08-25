@@ -60,7 +60,7 @@ module SparrowAuth
           Email verification is always on too. Neither has an off switch.
 
           The pages your users see are in THIS application, not in the engine:
-          `bin/rails generate sparrowkit:screens` wrote them and you own them.
+          You write them and you own them; SparrowKit ships none.
           The engine serves only Rodauth's own pages under /auth.
 
           Configuration in this app right now:

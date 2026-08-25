@@ -9,13 +9,12 @@ module SparrowUi
     # on a module's panel is that module's business, and the traffic light is
     # the module's own answer rather than sparrow_ui's reading of its settings.
     #
-    # keyword_init is required, not decorative. The gemspec promises Ruby 3.1,
-    # and only 3.2 gave a plain Struct keyword arguments -- on 3.1 a keywordless
-    # Struct binds the entire hash to `key` and every panel silently becomes
-    # nameless. .standard.yml targets 3.1 for this reason, so the cop that would
-    # call this redundant does not fire.
+    # Constructed with keywords, always. This carried `keyword_init: true` while
+    # the gems supported Ruby 3.1, where a keywordless Struct binds the entire
+    # hash to `key` and every panel silently becomes nameless. The floor is 3.2
+    # now, where Struct takes keyword arguments natively, so the flag went.
     Panel = Struct.new(:key, :name, :short_name, :summary, :engine, :status_source, :docs_url,
-      :guide_source, :setup_order, keyword_init: true) do
+      :guide_source, :setup_order) do
       # What the header's nav calls this panel, where there is room for a word
       # and not a phrase. "Authentication" and "Payments" are right on a card
       # that has a sentence under them and wrong in a row of three links.

@@ -27,9 +27,9 @@ module SparrowAuth
     # built-in paths both reach the organization *through* a membership, so that
     # was safe -- but a host's own organization_for_request does not, and a
     # subdomain rule returning an organization the account does not belong
-    # to would put it in request scope. require_organization! would catch that,
-    # if the action called it; an action using skip_authorization! would serve
-    # the wrong tenant's rows.
+    # to would put it in request scope, and the application's own authorization
+    # rule might never think to check -- so an action that only asked "is this
+    # user signed in?" would serve the wrong tenant's rows.
     #
     # Confirming the membership here means there is no state in which an
     # organization is in scope that the current account does not belong to. It
@@ -47,7 +47,7 @@ module SparrowAuth
     end
 
     # The membership this request is acting under, or nil. Set by the
-    # before_action above; read by SparrowAuth::Authorization.
+    # before_action above; read by the application's own authorization rules.
     attr_reader :sparrow_auth_membership
 
     def membership_for_the_requested_organization
