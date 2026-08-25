@@ -13,7 +13,7 @@ group :development, :test do
   gem "rspec", "~> 3.13"
   gem "standard", "~> 1.44"
 
-  gem "rspec-rails", "~> 7.0"
+  gem "rspec-rails", "~> 8.0"
   gem "puma", "~> 6.0"
 
   # Component specs assert on structure -- roles, attributes, nesting -- rather
