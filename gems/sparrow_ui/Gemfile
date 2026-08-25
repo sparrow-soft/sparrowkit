@@ -14,7 +14,7 @@ group :development, :test do
   gem "standard", "~> 1.44"
 
   gem "rspec-rails", "~> 7.0"
-  gem "puma", "~> 6.0"
+  gem "puma", "~> 8.0"
 
   # Component specs assert on structure -- roles, attributes, nesting -- rather
   # than on substrings of markup, which break on every whitespace change.
