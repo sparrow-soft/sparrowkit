@@ -1,0 +1,112 @@
+<%#
+  SparrowKit's compiled theme, inlined.
+
+  The dummy app has no asset pipeline -- deliberately, because the engine it
+  exercises cannot assume a host has one. So the stylesheet is read off disk
+  and inlined rather than linked.
+
+  This is the committed output of `rake ui:css`. If it is missing, run that.
+%>
+<style>
+<%= File.read(SparrowUi.stylesheet_path).html_safe %>
+</style>
+<style>
+  /* The harness's own colours, stated outright.
+   *
+   * These were `var(--color-slate-900)` and friends, read from the stylesheet
+   * inlined above. That broke the moment sparrow_ui stopped shipping
+   * components: Tailwind emits a --color-* only when some utility uses it, and
+   * with no components there are no utilities, so every one of those
+   * references resolved to nothing. The page still rendered, still returned
+   * 200, and lost all of its colour.
+   *
+   * Literal values instead. This is sparrow_auth's own smoke scaffolding, not
+   * part of anybody's theme, and it should not depend on what another gem's
+   * tree-shaking happens to keep. The values are Tailwind's slate/purple/
+   * blue/red, copied once.
+   *
+   * The names are local to this harness. */
+  :root {
+    --sk-surface: #ffffff;
+    --sk-surface-raised: #ffffff;
+    --sk-surface-sunken: #f8fafc; /* slate-50  */
+    --sk-text-primary: #0f172b;   /* slate-900 */
+    --sk-text-secondary: #45556c; /* slate-600 */
+    --sk-text-muted: #62748e;     /* slate-500 */
+    --sk-border: #e2e8f0;         /* slate-200 */
+    --sk-accent: #59168b;         /* purple-900 */
+    --sk-info: #1447e6;           /* blue-700  */
+    --sk-info-surface: #eff6ff;   /* blue-50   */
+    --sk-danger: #bf000f;         /* red-700   */
+    --sk-danger-surface: #fef2f2; /* red-50    */
+  }
+
+  /* Not an inversion. The accent CLIMBS -- purple-900 is 1.4:1 on a slate-900
+   * page and the links vanish -- and each tone's text and tint move together
+   * so the pair keeps its contrast. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sk-surface: #0f172b;        /* slate-900  */
+      --sk-surface-raised: #1d293d; /* slate-800  */
+      --sk-surface-sunken: #020618; /* slate-950  */
+      --sk-text-primary: #f1f5f9;   /* slate-100  */
+      --sk-text-secondary: #cad5e2; /* slate-300  */
+      --sk-text-muted: #90a1b9;     /* slate-400  */
+      --sk-border: #314158;         /* slate-700  */
+      --sk-accent: #d8b4ff;         /* purple-300 */
+      --sk-info: #91c5ff;           /* blue-300   */
+      --sk-info-surface: #162456;   /* blue-950   */
+      --sk-danger: #ffa3a4;         /* red-300    */
+      --sk-danger-surface: #460809; /* red-950    */
+    }
+  }
+
+  /* Base element styles for the harness itself. Tailwind's Preflight strips
+   * element defaults, and this page is plain HTML with no utility classes on
+   * it, so it has to say what a body and a link look like. */
+  body {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--sk-surface);
+    color: var(--sk-text-primary);
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.55;
+  }
+
+  h1, h2, h3 { font-weight: 700; line-height: 1.2; margin: 1.5rem 0 0.75rem; }
+  h1 { font-size: 1.75rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1rem; }
+  p, ul, ol { margin: 0.75rem 0; }
+  ul, ol { padding-left: 1.25rem; }
+
+  /* Hover is an underline, not a second colour. The harness can only safely
+   * name variables the stylesheet is guaranteed to carry, and Tailwind emits
+   * a --color-* only when some utility uses it -- so a purple-800 borrowed
+   * for a hover state would vanish the moment nothing else referenced it. */
+  a { color: var(--sk-accent); text-underline-offset: 2px; }
+  a:hover { text-decoration: underline; }
+
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+  }
+  code { background: var(--sk-surface-sunken); padding: 0.1rem 0.3rem; border-radius: 4px; }
+  pre {
+    background: var(--sk-surface-sunken);
+    border: 1px solid var(--sk-border);
+    border-radius: 8px;
+    padding: 0.875rem;
+    overflow-x: auto;
+  }
+
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--sk-border); }
+  th { font-size: 0.8125rem; color: var(--sk-text-secondary); }
+
+  button, input, select {
+    font: inherit;
+    color: inherit;
+  }
+</style>

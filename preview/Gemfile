@@ -1,0 +1,35 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# A host application for looking at the developer console.
+#
+# All four gems by path, so this is the only place the console renders with
+# every panel registered at once. Each gem's own dummy sees only itself and
+# whatever it happens to depend on -- sparrow_ui's sees Mail, sparrow_auth's
+# sees Auth and Mail -- so the header nav, the hub's card grid and the ordering
+# of panels have no other home to be looked at in.
+#
+# Not part of `rake`, not part of any gem's bundle, and depended on by nothing.
+# Adding these four to a gem's Gemfile instead would have put webauthn and a
+# payment SDK into sparrow_ui's test bundle to render a nav bar.
+gem "rails", ">= 7.1", "< 9"
+gem "puma", "~> 6.0"
+
+# PostgreSQL, and SQLite will not do.
+#
+# The console never queries anything, so a preview host on SQLite looked like a
+# free way to drop the dependency. It is not: sparrow_auth's Rodauth
+# configuration says `Sequel.postgres(extensions: :activerecord_connection)` in
+# so many words, per ADR 0001, and Rodauth's middleware evaluates that on every
+# request through the application -- console pages included. Every page 500s on
+# `cannot load such file -- pg` before it renders a byte.
+#
+# So this host runs on what the product runs on, which is also what every gem's
+# dummy already does.
+gem "pg", "~> 1.5"
+
+gem "sparrow_ui", path: "../gems/sparrow_ui"
+gem "sparrow_auth", path: "../gems/sparrow_auth"
+gem "sparrow_mail", path: "../gems/sparrow_mail"
+gem "sparrow_pay", path: "../gems/sparrow_pay"

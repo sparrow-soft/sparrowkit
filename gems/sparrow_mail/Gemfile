@@ -1,0 +1,33 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# Layer-isolated: sparrow_mail's suite resolves against sparrow_mail's
+# dependencies only. Nothing from sparrow_auth or sparrow_pay is reachable
+# from here, which is how the gem boundary stays honest.
+gemspec
+
+gem "rake", "~> 13.0"
+
+group :development, :test do
+  gem "rspec", "~> 3.13"
+  gem "standard", "~> 1.44"
+  gem "webmock", "~> 3.24"
+
+  # The gem does not depend on ActionMailer at runtime; this proves the
+  # integration works when a host application does have it. railties is here so
+  # bin/smoke can boot a real Rails application and exercise the Railtie rather
+  # than registering the delivery method by hand.
+  gem "actionmailer", ">= 7.0"
+  gem "railties", ">= 7.0"
+
+  # Optional adapter dependency, loaded lazily by Adapters::SES.
+  gem "aws-sdk-sesv2", "~> 1.60"
+
+  # The control panel is mounted by sparrow_ui and rendered in its layout, so
+  # the request specs for it need the real thing. Never a runtime dependency:
+  # sparrow_ui is development tooling and is not in a production bundle, which
+  # is exactly what the guard in lib/sparrow_mail/railtie.rb relies on.
+  gem "sparrow_ui", path: "../sparrow_ui"
+  gem "rspec-rails", "~> 7.0"
+end

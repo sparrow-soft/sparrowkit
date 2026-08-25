@@ -1,0 +1,294 @@
+<%#
+  One page: who charges the customer, the keys they need, and who in your
+  application is allowed to touch billing.
+
+  NO PROCESSOR IS NAMED IN THIS FILE. The dropdown is whatever Pay is willing
+  to run, and the fields under it are whatever Pay reads for the one chosen --
+  both asked of Pay at render time. A page listing them by hand would be right
+  on the day it was written and wrong at Pay's next release, and nothing would
+  say so. See lib/sparrow_pay/console/processors.rb.
+
+  These are console pages and Tailwind's `@source` scans this directory by
+  name. Views for the console belong here and nowhere else.
+%>
+<h1 class="text-2xl font-semibold text-slate-900 dark:text-slate-100">Payments</h1>
+<p class="mt-1 text-base text-slate-600 dark:text-slate-300">
+  SparrowKit bills the <span class="font-medium text-slate-900 dark:text-slate-100">organization</span>,
+  never the person &mdash; somebody can belong to several and can leave, and a
+  subscription attached to a person walks out of the door with them. What each
+  plan costs is configured at your processor, not here.
+</p>
+
+<% unless @writable %>
+  <div role="alert"
+       class="mt-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+    <p class="font-medium">This page cannot save anything yet</p>
+    <p class="mt-1"><%= @not_writable_reason %></p>
+  </div>
+<% end %>
+
+<form id="pay_form" action="<%= sparrowkit_path %>" method="post" autocomplete="off" class="mt-8">
+  <%#
+    Written out rather than built by form_with. Tailwind only compiles classes
+    it can find in a file, and a class inside an ERB tag is invisible both to
+    the build's scanner and to the spec that checks the build is not stale.
+  %>
+  <input type="hidden" name="_method" value="patch" autocomplete="off">
+  <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+
+  <section class="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Processor</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Who takes the money. Pay can talk to several and will not pick one for
+      you &mdash; until this is set, no organization can be given a customer
+      record and no checkout can start.
+    </p>
+
+    <div class="mt-4">
+      <label for="pay_processor" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        Charge through
+      </label>
+      <select id="pay_processor"
+              name="processor"
+              onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()"
+              class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 focus:border-purple-900 focus:outline-none focus:ring-1 focus:ring-purple-900 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-purple-300 dark:focus:ring-purple-300">
+        <option value="">Not set</option>
+        <% @processors.each do |name| %>
+          <option value="<%= name %>" <%= "selected" if @processor == name %>>
+            <%= SparrowPay::Console::Processors.label_for(name) %>
+          </option>
+        <% end %>
+      </select>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-300">
+        Changing this reloads the page, because each processor asks for
+        different keys. Nothing is saved until you press Save.
+      </p>
+    </div>
+  </section>
+
+  <% if @processor %>
+    <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+      <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <%= SparrowPay::Console::Processors.label_for(@processor) %> keys
+      </h2>
+
+      <% if @client_gem_missing %>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          Pay supports this processor but its client library is not installed,
+          so there is nothing to fill in yet. Add the gem to your Gemfile,
+          <code class="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs dark:bg-slate-800">bundle install</code>,
+          restart, and its fields appear here.
+        </p>
+      <% else %>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          These are written to
+          <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800"><%= @processor %>:</code>
+          in your credentials, which is where Pay reads them. The settings below
+          go to
+          <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">sparrow_pay:</code>,
+          which is where this gem reads its own.
+        </p>
+
+        <% @fields.each do |field| %>
+          <% optional = SparrowPay::Console::Processors.optional?(field[:name]) %>
+          <% boolean = SparrowPay::Console::Processors.boolean?(field[:name]) %>
+          <div class="mt-4">
+            <%#
+              A checkbox wears its label to the RIGHT, on the same line, because
+              that is where a checkbox's label goes: the two read as one control
+              and the whole phrase is the hit target. Above it, the label sat
+              over an unattached square and the pair read as a heading with an
+              orphan under it.
+
+              Every other field keeps its label above, which is where a label
+              belongs when the control is a box you type into.
+            %>
+            <% if boolean %>
+              <div class="flex items-center gap-2">
+                <%#
+                  Hidden field first, so the parameter is always present.
+                  A checkbox alone sends nothing when it is off, and for THIS
+                  field absent is not the same as off: Pay reads a blank value
+                  as TRUE (`value.blank? || cast(value)`), so an unchecked box
+                  that sent nothing would be stored as blank and come back on.
+                  The false is what makes off mean off.
+                %>
+                <input type="hidden" name="<%= field[:name] %>" value="false" autocomplete="off">
+                <input type="checkbox"
+                       id="pay_<%= field[:name] %>"
+                       name="<%= field[:name] %>"
+                       value="true"
+                       <%= "checked" if field[:value].to_s == "true" %>
+                       class="size-4 shrink-0 rounded border-slate-500 text-purple-900 dark:border-slate-600 dark:text-purple-300">
+                <%#
+                  No tick on a checkbox. The tick means "a value is stored", and
+                  for a switch that is true whether it was stored on or off --
+                  so a saved `false` drew a tick beside an empty box, which
+                  reads as "this is on" and is the one thing it is not.
+                %>
+                <label for="pay_<%= field[:name] %>" class="text-sm font-medium text-slate-900 dark:text-slate-100"><%= SparrowPay::Console::Processors.label_for(field[:name]) %><%= render "sparrow_ui/console/optional" if optional %></label>
+              </div>
+            <% else %>
+            <%#
+              "Optional" is the word doing the most work on this page. Pay
+              exposes every credential the same way, with no way to ask which
+              are required, so before this the card was five identical boxes and
+              a developer filled in all five -- hunting for two that do not
+              exist for an ordinary account.
+            %>
+            <label for="pay_<%= field[:name] %>" class="block text-sm font-medium text-slate-900 dark:text-slate-100"><%= SparrowPay::Console::Processors.label_for(field[:name]) %><%= render "sparrow_ui/console/secret_set" if field[:set] %><%= render "sparrow_ui/console/optional" if optional %></label>
+            <%#
+              A secret goes through sparrow_ui's field, which is a text box
+              masked by CSS rather than a `type="password"`. That is what stops
+              the browser offering to save a processor's API key to the
+              developer's password manager -- see the partial for why
+              `autocomplete="off"` cannot do it.
+            %>
+            <% if field[:secret] %>
+              <%= render "sparrow_ui/console/secret_field",
+                    id: "pay_#{field[:name]}",
+                    name: field[:name],
+                    hint: (field[:hint] if field[:set]) %>
+            <% else %>
+            <input type="text"
+                   id="pay_<%= field[:name] %>"
+                   name="<%= field[:name] %>"
+                   value="<%= field[:value] %>"
+                   autocomplete="off"
+                   spellcheck="false"
+                   class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 font-mono text-sm text-slate-900 focus:border-purple-900 focus:outline-none focus:ring-1 focus:ring-purple-900 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-purple-300 dark:focus:ring-purple-300">
+            <% end %>
+            <% end %>
+            <% if (help = SparrowPay::Console::Processors.help_for(field[:name])) %>
+              <p class="mt-1 text-xs text-slate-600 dark:text-slate-300"><%= help %></p>
+            <% end %>
+
+            <% if field[:secret] %>
+              <p class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                <%#
+                  No longer repeats the last four characters. The tick beside
+                  the label says a key is stored and the box shows which one,
+                  so saying it a third time in prose was the noise that made
+                  the first two hard to read.
+                %>
+                <% if field[:set] %>
+                  Leave blank to keep it; type a new one to replace it.
+                <% else %>
+                  Not set. Pay reads this from your credentials.
+                <% end %>
+              </p>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    </section>
+  <% end %>
+
+  <%#
+    Two cards where there was one called "Access".
+
+    It held the permissions class AND the address a customer is returned to
+    after paying, and the second of those is not access by any reading. A title
+    that describes half its card is a title somebody stops reading.
+  %>
+  <%#
+    THERE IS NO BOX HERE ANY MORE, and the absence is the point.
+
+    This card asked for the name of a class implementing the per-record policy
+    pattern for billing. That pattern went in 0.1.0 along with the billing pages it guarded,
+    so what was left was a text box asking for a class that could not be written,
+    protecting pages that no longer existed, with an amber warning that until it
+    was filled in "the billing pages refuse everybody".
+  %>
+  <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Who may see and change billing</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Nothing to set here, because it is the same question as everything else:
+      billing belongs to an organization, and who may read or change it is
+      decided by the role somebody holds in that organization.
+    </p>
+    <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+      In your own controller, where you can read and test it:
+    </p>
+    <pre class="mt-2 overflow-x-auto rounded-md bg-slate-100 px-3 py-2 font-mono text-xs text-slate-800 dark:bg-slate-800 dark:text-slate-200"><code>require_organization!(permission: "billing:read")
+require_organization!(permission: "billing:manage")</code></pre>
+    <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+      Both permissions ship: <code class="font-mono">billing:read</code> is held from
+      admin upwards and <code class="font-mono">billing:manage</code> by owners.
+      Reading which plan you are on and changing the card are deliberately not
+      the same permission.
+    </p>
+  </section>
+
+  <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">After paying</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Where your customer lands when they finish at the processor &mdash; after a
+      successful payment, after cancelling one, and after closing the billing
+      portal. All three come back to the same page, which then reads what
+      happened and says so.
+    </p>
+
+  </section>
+
+  <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Development</h2>
+
+    <div class="mt-3 flex items-start gap-3">
+      <%#
+        Hidden field first, so the parameter is always present. A checkbox alone
+        sends nothing when it is off, and "absent" would then be the same
+        request as "the client never rendered the control".
+      %>
+      <input type="hidden" name="allow_test_processor" value="0" autocomplete="off">
+      <input type="checkbox"
+             id="pay_allow_test_processor"
+             name="allow_test_processor"
+             value="1"
+             <%= "checked" if @allow_fake %>
+             class="mt-0.5 size-4 rounded border-slate-400 text-purple-900 focus:ring-purple-900 dark:border-slate-600 dark:text-purple-300 dark:focus:ring-purple-300">
+      <span>
+        <label for="pay_allow_test_processor" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+          Allow Pay's test processor
+        </label>
+        <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-300">
+          Lets subscriptions be created with no payment provider behind them, for
+          tests and local work. Off unless you say otherwise, deliberately: an
+          application that fell back to it would take no money and say nothing
+          about it.
+        </span>
+      </span>
+    </div>
+  </section>
+
+  <div class="mt-6 flex items-center gap-3">
+    <button type="submit"
+            <%= "disabled" unless @writable %>
+            class="rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-800 focus:outline-none focus:ring-2 focus:ring-purple-900 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-purple-300 dark:text-purple-950 dark:hover:bg-purple-200">
+      Save
+    </button>
+    <a href="<%= request.script_name.sub(%r{/pay\z}, "") %>"
+       class="text-sm font-medium text-slate-600 hover:underline dark:text-slate-300">Back to SparrowKit</a>
+  </div>
+</form>
+
+<h2 class="mt-10 text-base font-semibold text-slate-900 dark:text-slate-100">Not configured here</h2>
+<ul class="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-300">
+  <li>
+    <span class="font-medium">Plans, prices and what they cost</span> &mdash; those live at your
+    processor, where you already configured them. Restating them here would be
+    two places to change and a guarantee they drift.
+  </li>
+  <li>
+    <span class="font-medium">What a plan unlocks</span> &mdash; your processor has never heard of
+    your feature names. Ask
+    <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">organization.billing.active?</code>
+    and gate on it yourself.
+  </li>
+  <li>
+    <span class="font-medium">Webhooks</span> &mdash; Pay receives and verifies them. Point your
+    processor at
+    <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">/pay/webhooks/&lt;processor&gt;</code>
+    and the copied columns keep themselves current.
+  </li>
+</ul>

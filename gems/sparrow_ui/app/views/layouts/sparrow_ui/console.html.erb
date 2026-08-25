@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SparrowKit</title>
+    <%#
+      Inlined rather than linked. A mountable engine cannot assume the host has
+      an asset pipeline, or which one, and this page has to render on a fresh
+      install before anything is configured.
+
+      The font URL is rewritten on the way in. Inlined CSS resolves a relative
+      url() against the PAGE, not against a stylesheet, so the compiled
+      `url(InterVariable.woff2)` asked the host for /InterVariable.woff2 --
+      a routing error in the log on every single console page, and the theme
+      quietly falling back to a system font.
+
+      It cannot be absolute in the compiled file: the host picks where to mount
+      this engine and the build cannot know. Here it can, because
+      sparrow_ui.font_path is generated against the actual mount.
+    %>
+    <style><%=
+      File.read(SparrowUi.stylesheet_path)
+        .sub(SparrowUi::FONT_URL_IN_STYLESHEET, "url(#{sparrow_ui.font_path})")
+        .html_safe
+    %></style>
+
+    <script>
+      // Applies a saved theme choice before anything is painted.
+      //
+      // In <head>, above <body>, and deliberately not deferred. Anywhere later
+      // -- the end of the body, DOMContentLoaded, an external file -- the
+      // browser has already painted the page dark, and somebody who chose
+      // light watches it flash dark and correct itself on every navigation.
+      //
+      // Nothing here is required for the console to work. Stored nothing, or
+      // scripting off, and the page is dark: that is the default, and it comes
+      // from the stylesheet rather than from this script.
+      (function () {
+        try {
+          var choice = localStorage.getItem("sparrowkit-console-theme");
+          // "dark" is written through as well as light and system, even though
+          // it is what the page would do anyway. The attribute is then a
+          // record of what was CHOSEN rather than of what it looks like, and
+          // the day the default changes a developer who picked dark still has
+          // dark.
+          if (choice === "light" || choice === "dark" || choice === "system") {
+            document.documentElement.setAttribute("data-theme", choice);
+          }
+        } catch (e) {
+          // Storage can throw rather than return null: Safari in private
+          // browsing, and any browser with site data blocked. A console that
+          // refused to render because it could not remember a colour would be
+          // a poor trade, so the default stands.
+        }
+      })();
+    </script>
+  </head>
+  <body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <%#
+      The mount prefix, worked out once.
+
+      `request.script_name` is wrong here and right on the hub, which is the
+      trap: on the hub it is sparrow_ui's own mount, but this layout also
+      renders inside every panel's engine, where it is that panel's mount --
+      so nav links built from it would point at /sparrowkit/auth/auth.
+      sparrow_ui.root_path is asked of the route set that did the mounting and
+      is the same string on every page.
+
+      chomp("/") because root_path ends in one and panel.path begins with one.
+      Mounted at the host's root it chomps to "" and the links are still right.
+    %>
+    <% console_root = sparrow_ui.root_path.chomp("/") %>
+
+    <header class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div class="mx-auto flex max-w-4xl flex-wrap items-center gap-x-5 gap-y-3 px-6 py-4">
+        <a href="<%= sparrow_ui.root_path %>"
+           class="text-base font-semibold text-purple-900 dark:text-purple-300">SparrowKit</a>
+        <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <%= SparrowUi::VERSION %>
+        </span>
+
+        <%#
+          The nav and the switcher, wrapped together as ONE flex item so that
+          `ml-auto` has something to push.
+
+          Both tried it on their own first, and both were wrong. On the nav
+          alone, a window around 640px is wide enough to keep the nav on the
+          first row and too narrow for the switcher, which then wraps to a
+          second row carrying no auto margin and lands hard left. On the
+          switcher alone it is worse: the nav is not rendered at all when no
+          module has registered, and the only right-aligned thing on the header
+          is gone.
+
+          Wrapped, the pair right-aligns as a unit and `justify-end` keeps them
+          against the edge when they wrap against each other.
+        %>
+        <% panels = SparrowUi::Console.panels %>
+        <%#
+          Which panel this is, asked once. The nav asks the same question per
+          link to mark the current one; the Docs button needs the answer itself,
+          and computing it twice is two places for the two to disagree about
+          where you are.
+        %>
+        <% current_panel = panels.find { |panel| panel.current?(request.path, console_root) } %>
+        <div class="ml-auto flex flex-wrap items-center justify-end gap-x-5 gap-y-3">
+          <%#
+            From the registry, so this row is whatever is actually installed. A
+            hardcoded Auth | Mail | Pay would offer a link to a gem that is not
+            in the Gemfile, and 404 the developer who trusted it.
+          %>
+          <% if panels.any? %>
+            <nav aria-label="Modules" class="flex items-center gap-1">
+              <% panels.each do |panel| %>
+                <% href = "#{console_root}#{panel.path}" %>
+                <% current = panel.current?(request.path, console_root) %>
+                <%#
+                  The full name as a tooltip, but only where it says something
+                  the link does not. Mail's short name IS its name, and a title
+                  repeating the visible text is a second copy of the same word
+                  for anything that reads both aloud.
+                %>
+                <%#
+                  Asked here as well as on the hub's cards, so the hub computes
+                  each module's status twice per render. Left that way on
+                  purpose: Panel#status is documented as asked fresh every time,
+                  precisely so a panel that was just saved is not reported by a
+                  stale copy, and every module's answer is a read of credentials
+                  Rails has already memoised. Caching it per request would buy
+                  nothing measurable and put a way for the two to disagree into
+                  the one page that shows both.
+                %>
+                <a href="<%= href %>"
+                   <%= "aria-current=\"page\"".html_safe if current %>
+                   <%= tag.attributes(title: panel.name) if panel.short_name != panel.name %>
+                   class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-purple-900 aria-[current=page]:bg-slate-100 aria-[current=page]:text-purple-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-purple-300 dark:aria-[current=page]:bg-slate-800 dark:aria-[current=page]:text-purple-300"><%#
+                  The glyph AFTER the name, and that is about the reading order
+                  rather than the look. The partial ends with the state in
+                  words for a screen reader, so putting it first would make the
+                  link announce ": Ready Auth".
+                %><%= panel.short_name %><%= render "sparrow_ui/console/nav_status", status: panel.status %></a>
+              <% end %>
+            </nav>
+          <% end %>
+
+          <%#
+            Documentation, for whichever module is open. The URL comes from the
+            panel rather than being written out per page: Panel#docs_url already
+            derives one from the key, so a page that spelled its own out would
+            be a second copy to keep in step.
+
+            Opens in a new tab, which is not the usual default here. The auth
+            and mail panels are forms somebody may be halfway through filling
+            in, and sending them off to another site in the same tab throws
+            away what they had typed.
+          %>
+          <% docs_href = current_panel&.docs_url || "#{SparrowUi::Console::DOCS_URL}/" %>
+          <a href="<%= docs_href %>"
+             target="_blank"
+             rel="noopener"
+             class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-purple-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-purple-300">
+            Docs<span class="sr-only"> (opens in a new tab)</span>
+            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-3.5">
+              <path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V10" stroke-linecap="round"/>
+              <path d="M10 2h4v4M14 2 7.5 8.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+
+          <%#
+            Hidden until the script un-hides it, because without scripting
+            there is nothing for it to do: the page is already dark by default,
+            from the stylesheet, and a dead control that never responds is
+            worse than no control.
+
+            Hidden by the `hidden` UTILITY rather than the attribute. The
+            attribute is `display: none` from the browser's own stylesheet,
+            which any author rule beats -- so `flex` on the same element would
+            win and it would never be hidden at all. Both are classes here, so
+            the last one set decides.
+
+            Styled off aria-pressed rather than a class the script swaps. The
+            state a screen reader announces and the state you can see are then
+            the same fact, and cannot drift apart.
+
+            Icons rather than words, and each still carries its word. The glyph
+            is hidden from anything that reads the page aloud and the name is
+            in an sr-only span, so the button is still announced as "System",
+            "Light" or "Dark" -- an icon-only control whose name is only in a
+            tooltip is a control a screen reader cannot describe. `title` is
+            there as well, for a pointer.
+          %>
+          <div id="sk-theme"
+               role="group"
+               aria-label="Colour theme"
+               class="hidden items-center gap-0.5 rounded-md border border-slate-300 p-0.5 dark:border-slate-700">
+            <button type="button" data-sk-theme="system" aria-pressed="false" title="Follow the system setting"
+                    class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
+              <span class="sr-only">System</span>
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
+                <rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.25"/>
+                <path d="M5.5 14h5M8 11.5V14" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button type="button" data-sk-theme="light" aria-pressed="false" title="Always light"
+                    class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
+              <span class="sr-only">Light</span>
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
+                <circle cx="8" cy="8" r="3.25"/>
+                <path d="M8 1v1.5M8 13.5V15M15 8h-1.5M2.5 8H1M12.95 3.05l-1.06 1.06M4.11 11.89l-1.06 1.06M12.95 12.95l-1.06-1.06M4.11 4.11 3.05 3.05" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button type="button" data-sk-theme="dark" aria-pressed="false" title="Always dark"
+                    class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
+              <span class="sr-only">Dark</span>
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
+                <path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1Z" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-4xl px-6 py-10">
+      <% if flash[:notice] %>
+        <div role="status"
+             class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
+          <%= flash[:notice] %>
+        </div>
+      <% end %>
+      <% if flash[:alert] %>
+        <div role="alert"
+             class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          <%= flash[:alert] %>
+        </div>
+      <% end %>
+
+      <%= yield %>
+    </main>
+
+    <%#
+      In the layout, so it reaches every page under /sparrowkit -- the hub and
+      every module's panel, including ones no gem has written yet. A panel that
+      had to remember to render its own footer is a panel that will forget.
+
+      The year is the current one rather than a literal. A copyright line
+      frozen at the year it was typed is wrong from the next January onwards,
+      and nobody notices a footer going stale.
+    %>
+    <footer class="mx-auto max-w-4xl px-6 pb-10 text-sm text-slate-500 dark:text-slate-300">
+      &copy; <%= Time.now.year %>
+      <a href="https://sparrowkit.co"
+         class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit</a>
+      - a
+      <a href="https://sparrowsoft.co"
+         class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowSoft</a>
+      project
+    </footer>
+
+    <script>
+      // The other half of the switcher. The <head> script already applied the
+      // stored choice; this reveals the control and lets it be changed.
+      //
+      // At the end of the body rather than in <head> so the buttons exist to
+      // be found, and with no listener to wait for. Vanilla and inline, for
+      // the same reason as the rest of this console: it is served to one
+      // machine in development, and a toolchain to toggle a colour would be
+      // the wrong trade.
+      (function () {
+        var group = document.getElementById("sk-theme");
+        if (!group) return;
+
+        var buttons = group.querySelectorAll("[data-sk-theme]");
+        var root = document.documentElement;
+
+        // "dark" for anything unrecognised, because dark is the default and
+        // the button that is lit has to be the state the page is actually in.
+        function read() {
+          try {
+            var stored = localStorage.getItem("sparrowkit-console-theme");
+            return stored === "light" || stored === "system" || stored === "dark"
+              ? stored
+              : "dark";
+          } catch (e) {
+            // Same storage failure the <head> script tolerates. The control
+            // still works for this page; it just will not be remembered, and
+            // saying so would be a dialog nobody asked for.
+            return "dark";
+          }
+        }
+
+        function show(choice) {
+          for (var i = 0; i < buttons.length; i++) {
+            var button = buttons[i];
+            button.setAttribute(
+              "aria-pressed",
+              button.getAttribute("data-sk-theme") === choice ? "true" : "false"
+            );
+          }
+        }
+
+        // All three are written, none removed. The absence of the attribute is
+        // not a fourth state to fall back to -- it is the default, dark -- so
+        // clearing it on "system" would leave a developer on a light-set
+        // machine looking at a dark page having just asked for their machine's
+        // setting.
+        function apply(choice) {
+          root.setAttribute("data-theme", choice);
+
+          try {
+            localStorage.setItem("sparrowkit-console-theme", choice);
+          } catch (e) {
+            // Nothing to do. The page still changed.
+          }
+
+          show(choice);
+        }
+
+        for (var i = 0; i < buttons.length; i++) {
+          buttons[i].addEventListener("click", function (event) {
+            apply(event.currentTarget.getAttribute("data-sk-theme"));
+          });
+        }
+
+        show(read());
+
+        // Both classes, in this order. `hidden` and `flex` are each a
+        // `display` rule from the same stylesheet, so removing one and adding
+        // the other is what actually reveals it.
+        group.classList.remove("hidden");
+        group.classList.add("flex");
+      })();
+    </script>
+  </body>
+</html>

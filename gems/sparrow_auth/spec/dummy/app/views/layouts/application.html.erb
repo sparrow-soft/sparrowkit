@@ -1,0 +1,8 @@
+<%# The host application's layout, which is what Rodauth's pages render inside.
+    A real Rails application has this from the moment `rails new` runs; the
+    dummy never did, because the engine used to ship a layout of its own. %>
+<!DOCTYPE html>
+<html>
+  <head><title>Dummy</title><%= csrf_meta_tags %></head>
+  <body><%= yield %></body>
+</html>

@@ -1,0 +1,30 @@
+<%#
+  One module's status, as a glyph, for the header nav.
+
+  The hub's `_status` partial is the same fact in words on a pill. This is the
+  version that fits beside a link in a row of three, and it answers a narrower
+  question: is there anything here for me, yes or no. The panel it links to says
+  what.
+
+  FOUR states, TWO glyphs. `ready` is the tick; attention, unconfigured and
+  unknown are all the question mark, because from the header they mean the same
+  thing -- there is something here you have not finished. Splitting them into
+  three glyphs would ask somebody to learn a legend to read a nav bar, and the
+  distinction they carry is on the panel already.
+
+  `unknown` gets the question mark rather than nothing. A module that failed to
+  answer is not a module that is fine, and rendering no glyph would be
+  indistinguishable from a console built before this existed.
+
+  Never the colour alone: WCAG 1.4.1. The two glyphs are different SHAPES at any
+  size, and the exact state is spelled out for a screen reader below -- so the
+  colour is the third signal rather than the only one.
+%>
+<%= render "sparrow_ui/console/status_glyph", ready: status.ready?, label: status.label %>
+
+<%#
+  The word itself, for anything that reads the page aloud. The link's accessible
+  name becomes "Auth: Ready" -- it still begins with the visible text, which is
+  what WCAG 2.5.3 asks so that "click Auth" keeps working for speech input.
+%>
+<span class="sr-only">: <%= status.label %></span>

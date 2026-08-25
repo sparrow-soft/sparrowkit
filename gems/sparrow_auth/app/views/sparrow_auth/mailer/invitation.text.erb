@@ -1,0 +1,7 @@
+You have been invited<%= " by #{@invited_by}" if @invited_by.present? %>.
+
+<%= @url %>
+
+This link expires in <%= (SparrowAuth.config.invitation_expiry / 86_400).round %> days,
+and can only be used by the address it was sent to, after that address has been
+confirmed. Forwarding it will not work.

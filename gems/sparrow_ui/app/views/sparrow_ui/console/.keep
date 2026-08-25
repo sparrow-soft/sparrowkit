@@ -1,0 +1,4 @@
+# The console's pages land here. Held open because git does not track empty
+# directories, and Rails filters an engine's view paths to those that exist on
+# disk -- so without this the engine would have no view path at all on a fresh
+# clone, and Tailwind's @source would scan nothing.

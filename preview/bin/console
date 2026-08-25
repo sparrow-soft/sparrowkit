@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Serve the SparrowKit developer console with all three panels registered.
+#
+#   preview/bin/console          http://127.0.0.1:4500/sparrowkit
+#   preview/bin/console 4300     somewhere else
+#
+# Runs from anywhere: it changes to its own directory first, because `rails
+# server` finds an application by looking in the working directory and the
+# repository root is not one. That is not a hypothetical -- run it from the
+# root and Rails decides you meant `rails new` and prints the generator's help.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [ ! -f Gemfile.lock ]; then
+  echo "First run: installing this host's gems."
+  bundle install
+fi
+
+# Created, never migrated. Rodauth's middleware wants a connection and the
+# console queries no table, so an empty database is the whole of the setup --
+# see config/application.rb. db:create is a no-op once it exists.
+if ! RAILS_ENV=development bundle exec ./bin/rails db:create >/dev/null 2>&1; then
+  echo "Could not create the preview database. Running it again with the error:"
+  echo "(PostgreSQL has to be running: try \`pg_isready\`.)"
+  RAILS_ENV=development bundle exec ./bin/rails db:create
+  exit 1
+fi
+
+# 127.0.0.1, not localhost and not 0.0.0.0.
+#
+# The console's gate reads the socket peer and refuses anything that is not
+# this machine. Binding to every interface would publish a page to the network
+# that every request would then be refused -- which reads as a broken console
+# rather than as the policy it is.
+exec bundle exec rails server -e development -b 127.0.0.1 -p "${1:-4500}"

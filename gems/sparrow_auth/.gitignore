@@ -1,0 +1,9 @@
+
+
+# Written by bin/smoke, which generates the buyer's own sign-in screen so its
+# checks run against the file a buyer actually gets. Removed again in an
+# at_exit -- but a run killed outright would leave it behind, and a stray
+# controller here is autoloaded by the next rspec run and collides with the one
+# spec/generators/generated_screens_run_spec.rb evals.
+spec/dummy/app/controllers/sign_in_controller.rb
+spec/dummy/app/views/sign_in/

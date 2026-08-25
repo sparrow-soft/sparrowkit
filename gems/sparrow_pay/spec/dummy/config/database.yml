@@ -1,0 +1,22 @@
+# Postgres by default; DB=sqlite runs the same suite against SQLite. Both are
+# supported databases, so both have to be the thing the tests actually test.
+<% if ENV["DB"] == "sqlite" %>
+default: &default
+  adapter: sqlite3
+  pool: 5
+  timeout: 5000
+
+test:
+  <<: *default
+  database: storage/sparrow_pay_test.sqlite3
+<% else %>
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: 5
+  host: <%= ENV.fetch("PGHOST", "localhost") %>
+
+test:
+  <<: *default
+  database: <%= ENV.fetch("SPARROW_PAY_TEST_DB", "sparrow_pay_test") %>
+<% end %>

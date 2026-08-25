@@ -1,0 +1,36 @@
+<%#
+  The console's two status glyphs, in one place.
+
+  Locals: ready (boolean), label (what it means, for the tooltip).
+
+  Rendered beside a module in the header nav and beside a secret that is
+  already stored. Shared so the tick a developer learns in the nav is the same
+  tick they meet on a field -- two hand-drawn ticks would drift, and a glyph
+  that means "fine" has to look identical everywhere or it means nothing.
+
+  aria-hidden with a title: the tooltip still appears on hover, and the glyph
+  stays out of the accessibility tree so it cannot be announced alongside the
+  words its caller renders for exactly that purpose.
+
+  Measured against every ground it sits on -- the header and a card, in both
+  schemes, plus the filled pill the current panel's link wears. Worst case is
+  amber-600 on the light pill at 4.75:1, against the 3:1 WCAG 1.4.11 asks of a
+  graphic that carries meaning.
+%>
+<svg aria-hidden="true"
+     viewBox="0 0 24 24"
+     fill="none"
+     stroke="currentColor"
+     stroke-width="2"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     class="size-4 shrink-0 <%= ready ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400" %>">
+  <title><%= label %></title>
+  <circle cx="12" cy="12" r="9"></circle>
+  <% if ready %>
+    <path d="M8 12.3 10.8 15 16 9.5"></path>
+  <% else %>
+    <path d="M9.4 9.6a2.7 2.7 0 1 1 3.5 2.6c-.6.25-.9.8-.9 1.5v.4"></path>
+    <path d="M12 16.9v.1"></path>
+  <% end %>
+</svg>

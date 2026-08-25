@@ -1,0 +1,30 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Boots the dummy host so a human can use the console.
+#
+#   bin/console        then open http://127.0.0.1:3535/sparrowkit
+#
+# Bound to loopback explicitly. The engine's gate would refuse anything else
+# anyway; binding narrowly means it is never offered in the first place.
+ENV["RAILS_ENV"] = "development"
+
+require_relative "../spec/dummy/config/environment"
+require "puma"
+require "puma/configuration"
+require "puma/launcher"
+
+port = (ARGV[0] || 3535).to_i
+puts "SparrowKit console on http://127.0.0.1:#{port}/sparrowkit  (ctrl-c to stop)"
+
+# Puma's launcher directly, not a Rack handler. Rack 3 moved the handler into
+# the separate `rackup` gem, which this bundle does not carry, and adding a
+# dependency to start a development server would be the wrong trade.
+config = Puma::Configuration.new do |c|
+  c.bind "tcp://127.0.0.1:#{port}"
+  c.app Rails.application
+  c.workers 0
+  c.threads 1, 5
+end
+
+Puma::Launcher.new(config).run

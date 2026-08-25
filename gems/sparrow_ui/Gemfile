@@ -1,0 +1,36 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# Layer-isolated: this suite resolves against sparrow_ui's own dependencies
+# only -- railties and actionview, and nothing a sibling gem happens to have.
+# It said "no runtime dependencies" until the gem became an engine.
+gemspec
+
+gem "rake", "~> 13.0"
+
+group :development, :test do
+  gem "rspec", "~> 3.13"
+  gem "standard", "~> 1.44"
+
+  gem "rspec-rails", "~> 7.0"
+  gem "puma", "~> 6.0"
+
+  # Component specs assert on structure -- roles, attributes, nesting -- rather
+  # than on substrings of markup, which break on every whitespace change.
+  gem "nokogiri", "~> 1.16"
+
+  # The dummy host boots active_model/railtie so form builders work in the field
+  # specs. Deliberately not a dependency of the gem: the engine renders markup
+  # and never names an ActiveModel constant, so a host gets it from its own
+  # Rails install rather than from here. Bounded like the gemspec's Rails
+  # dependencies so the three always resolve to one version.
+  gem "activemodel", ">= 8.1", "< 9"
+
+  # A real panel from a real module, so the dummy host exercises the registry,
+  # the mount and the hub the way a developer's application will. Without one,
+  # the hub only ever renders its empty state and the mount below /sparrowkit
+  # is never proven to work. Development group only, on both sides: sparrow_ui
+  # depends on no module and no module depends on sparrow_ui at runtime.
+  gem "sparrow_mail", path: "../sparrow_mail"
+end

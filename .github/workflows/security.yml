@@ -1,0 +1,52 @@
+name: Security
+
+# Known-vulnerability checks, kept out of CI so they can run on a schedule.
+#
+# A daily run matters more than it looks: most advisories arrive against a
+# lockfile nobody has touched, so a check that only runs on push finds them
+# whenever somebody next happens to push, which may be weeks.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 7 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  bundler-audit:
+    name: bundler-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - run: bundle exec rake audit
+
+  brakeman:
+    name: brakeman
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only the two engines with an app/ directory. Brakeman models a Rails
+        # application, so it has nothing to read in sparrow_mail or sparrow_pay
+        # -- their code lives in lib/, which is CodeQL's job.
+        gem: [sparrow_auth, sparrow_ui]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      # --force because a Rails engine is not a Rails application by Brakeman's
+      # definition, and it declines to scan one without being told to.
+      - run: bundle exec brakeman --no-pager --force --quiet --exit-on-warn gems/${{ matrix.gem }}

@@ -1,0 +1,127 @@
+/* The developer console's stylesheet. This is the whole thing.
+ *
+ * Stock Tailwind plus the Inter font. There are no colours of ours, no
+ * semantic layer, no components and no hand-written rules -- a panel writes
+ * ordinary Tailwind classes and the markup decides how it looks.
+ *
+ * Compiled by `rake ui:css` into app/assets/stylesheets/sparrow_ui/console.css,
+ * which is committed, because a host installs a gem and not a build toolchain.
+ */
+@import "tailwindcss";
+
+/* Every place a console page can be written. Tailwind only emits utilities it
+ * finds in these files, so a module adding a class runs `rake ui:css` and
+ * commits the result -- the same rebuild any Tailwind application does.
+ *
+ * Scoped to each gem's `console` directory, NOT to its whole app/views. The
+ * wider glob sweeps up sparrow_auth's sign-in pages, which are end-user
+ * surfaces styled by hand with `sa-*` class names and no Tailwind anywhere;
+ * they are not this stylesheet's business and their class names are not
+ * utilities. */
+@source "../app/views/layouts/sparrow_ui";
+@source "../app/views/sparrow_ui/console";
+@source "../../sparrow_auth/console/app/views/sparrow_auth/console";
+@source "../../sparrow_mail/console/app/views/sparrow_mail/console";
+@source "../../sparrow_pay/console/app/views/sparrow_pay/console";
+
+/* The layout is named first and named deliberately. Its classes compiled
+ * before it was listed, but only by the auto-detection described below -- and
+ * a file that is only swept up by accident is a file the staleness spec never
+ * checks. Its header is on every console page; a class of its own that quietly
+ * failed to compile would be the most visible breakage in the console. */
+
+/* A wrinkle worth knowing rather than fighting: Tailwind v4 also auto-detects
+ * sources under the directory it runs in, so `@source` ADDS to that rather
+ * than replacing it. Prose in this gem's own comments and README therefore
+ * contributes a handful of phantom utilities -- `.static` and `.block` come
+ * from English words, not from any markup. It costs a few hundred bytes and
+ * nothing else, so it is left alone. */
+
+/* Self-hosted, referenced by a bare filename the engine's asset paths resolve.
+ * A developer console should not phone a CDN every time it opens, and it has
+ * to work with no network. Delete this block and the `--font-sans` line below
+ * and the console falls back to the system sans stack, with nothing else
+ * changing. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  /* One variable file across the whole range, so a heavy weight is real rather
+   * than synthesised. The RANGE is what tells the browser it is variable --
+   * the legacy `woff2-variations` format hint is not understood everywhere. */
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("InterVariable.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* The console is dark. `dark:` says so, and then obeys anybody who disagrees.
+ *
+ * Stock Tailwind compiles `dark:` to `@media (prefers-color-scheme: dark)` and
+ * nothing else, which is a theme no switcher can move and a default the
+ * machine picks rather than we do. Redefining it as a plain attribute selector
+ * is the usual fix and it is also wrong: `dark:` would then depend entirely on
+ * markup the header's script writes, so with scripting off -- or in the
+ * instant before the script runs -- the console would be light.
+ *
+ * Three states, and the attribute is written only by the two that are a
+ * choice:
+ *
+ *   no data-theme       DARK. The default, and what a fresh install gets on
+ *                       any machine, with or without scripting.
+ *   data-theme=dark     dark, chosen
+ *   data-theme=light    light, chosen
+ *   data-theme=system   whatever the machine says, chosen
+ *
+ * The first rule is a :not() rather than a match on [data-theme="dark"],
+ * because the state it has to cover is the one with no attribute at all. That
+ * is what makes dark the default in CSS rather than in JavaScript -- the page
+ * is already dark when the stylesheet parses, so there is nothing to correct
+ * afterwards and nothing to flash.
+ *
+ * :where() throughout, so none of this adds specificity -- a `dark:` utility
+ * has to keep losing to a later one in the same layer, the way it does now. */
+@custom-variant dark {
+  &:where(:not(
+    [data-theme="light"], [data-theme="light"] *,
+    [data-theme="system"], [data-theme="system"] *
+  )) {
+    @slot;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:where([data-theme="system"], [data-theme="system"] *) {
+      @slot;
+    }
+  }
+}
+
+:root {
+  /* Dark, to match the default above. This is what paints the scrollbars, the
+   * caret, the date picker and the select menu -- the parts of the page the
+   * browser draws rather than we do. Left at `light dark` they would follow
+   * the machine and a light-set laptop would get pale scrollbars down the side
+   * of a dark console. */
+  color-scheme: dark;
+
+  /* Inter carries an optical-size axis. Left alone the browser pins it to the
+   * default and a large heading gets letterforms drawn for body copy. */
+  font-optical-sizing: auto;
+}
+
+/* The half of the switcher Tailwind cannot express: the same three states
+ * again, for the browser's own furniture. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="system"] {
+  color-scheme: light dark;
+}

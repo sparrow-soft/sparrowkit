@@ -1,0 +1,302 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Bundler first, before anything else is required. See bin/smoke for why.
+ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
+require "bundler/setup"
+
+# Manual smoke test for passkeys.
+#
+# This one is driven by a person, and it has to be. Everything else in this gem
+# is tested against a software authenticator, which produces real key pairs and
+# real signatures and verifies through exactly the same code a Touch ID
+# credential does — but it is not a browser. What it cannot exercise is the part
+# that actually breaks in practice: conditional UI, the platform's own prompt,
+# whether the credential is discoverable, and the differences between Safari,
+# Chrome and Firefox in all three.
+#
+# Three independent WebAuthn implementations in this portfolio each got the
+# cryptography right and each got some of that wrong. So: a real browser, a real
+# finger on a real sensor, and a checklist.
+#
+#   bin/smoke-passkeys              # boot it and print the checklist
+#   bin/smoke-passkeys --dry-run    # print the checklist, touch nothing
+#   bin/smoke-passkeys --keep-db    # leave the database behind afterwards
+#
+# It serves on localhost rather than 127.0.0.1 on purpose. WebAuthn requires a
+# secure context, and browsers treat "localhost" as one without TLS — but the
+# Relying Party ID has to match the hostname in the address bar, so a credential
+# enrolled on localhost will not work on 127.0.0.1 and the other way round.
+# Getting that pair wrong is the single most common way a passkey integration
+# fails, and it fails with an error that names neither.
+
+require "optparse"
+require "socket"
+
+ROOT = File.expand_path("..", __dir__)
+
+# Helpers on main's singleton class, not on Object. See bin/smoke for the bug
+# that taught us this.
+class << self
+  def load_env_file(path)
+    return unless File.exist?(path)
+
+    File.readlines(path, encoding: "UTF-8").each do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?("#")
+
+      key, value = line.split("=", 2)
+      next if key.nil? || value.nil?
+
+      ENV[key.strip] ||= value.strip.delete_prefix('"').delete_suffix('"')
+    end
+  end
+end
+
+class << self
+  # Blank is unset: .env.smoke ships with optional keys present but empty, and
+  # an empty string is truthy in Ruby.
+  def env(name)
+    value = ENV[name]
+    (value.nil? || value.strip.empty?) ? nil : value.strip
+  end
+end
+
+load_env_file(File.join(ROOT, ".env.smoke"))
+
+options = {dry_run: false, keep_db: false}
+OptionParser.new do |parser|
+  parser.banner = "Usage: bin/smoke-passkeys [options]"
+  parser.on("--dry-run", "Print the checklist and touch nothing") { options[:dry_run] = true }
+  parser.on("--keep-db", "Leave the smoke database in place afterwards") { options[:keep_db] = true }
+  parser.on("-h", "--help") {
+    puts parser
+    exit 0
+  }
+end.parse!
+
+DB_NAME = ENV["SPARROW_AUTH_SMOKE_DB"] || "sparrow_auth_passkey_smoke"
+PORT = Integer(ENV["SMOKE_PORT"] || 0)
+
+GREEN = "\e[32m"
+DIM = "\e[2m"
+BOLD = "\e[1m"
+RESET = "\e[0m"
+
+# Helpers live on this script's own object, not on Object.
+#
+# A bare `def` at the top level of a Ruby script defines a private instance
+# method on Object, so every object in the process answers to it — including
+# classes inside gems, and including their DSLs. This script's `skip` shadowed
+# BinData's `skip` inside tpm-key_attestation, a transitive dependency of the
+# webauthn gem, and broke it at load time with an arity error pointing at a
+# file with nothing to do with passkeys. Every request then 500'd.
+#
+# `class << self` puts these on main's singleton class instead. Call sites are
+# unchanged, and nothing else in the process can see them.
+class << self
+  def step(number, title, detail)
+    puts "\n  #{BOLD}#{number}. #{title}#{RESET}"
+    detail.each_line { |line| puts "     #{line.chomp}" }
+  end
+end
+
+class << self
+  def checklist(base)
+    puts "\n#{BOLD}What to do, and what to watch for#{RESET}"
+
+    step 1, "Create an account with no password at all", <<~TEXT
+      Open #{base}/auth/otp and enter any address. Read the six-digit
+      code from #{base}/mailbox and enter it.
+      #{DIM}WATCH: you now have a verified account and never chose a password.
+      The code proved you can read that mailbox, which is the only thing
+      the account ever had to prove.#{RESET}
+      If you would rather test the password path, #{base}/auth/create-account
+      still works and the rest of this checklist is the same.
+    TEXT
+
+    step 2, "Take the offer", <<~TEXT
+      #{base} now offers to add a passkey, because you are signed in and
+      have none. That prompt is the host application's, not the engine's —
+      the engine only answers whether an account has one.
+    TEXT
+
+    step 3, "Enrol a passkey", <<~TEXT
+      Follow "Add a passkey".
+      #{DIM}WATCH: the operating system prompt should name the site and your
+      email address, not a number and not "localhost".#{RESET}
+      An account that HAS a password is asked for it first, deliberately:
+      that is what stops somebody at an unlocked laptop quietly adding a
+      way in of their own. An account created by code has no password, so
+      there is nothing to ask for and the session alone is the gate. That
+      asymmetry is real and is written down in the README.
+    TEXT
+
+    step 4, "Sign out, then sign in with the passkey and nothing else", <<~TEXT
+      Sign out, then open #{base}/auth/login and click into the email
+      field WITHOUT typing anything.
+      #{DIM}WATCH: your browser should offer the passkey in the field's own
+      dropdown. That is conditional UI, and it is the whole point — no
+      address is typed, so there is nothing to enumerate against.#{RESET}
+      If nothing is offered, the credential was not discoverable. Note the
+      browser and version; that is a real finding, not a flake.
+    TEXT
+
+    step 5, "Enrol a second device, if you have one", <<~TEXT
+      Your phone, over the cross-device flow. #{base}/auth/passkeys
+      should then list two, and both should sign in.
+    TEXT
+
+    step 6, "Name them, so they can be told apart", <<~TEXT
+      Rename one on #{base}/auth/passkeys.
+      #{DIM}WATCH: the name is ours. WebAuthn does not carry one, which is why
+      a list of unnamed credentials is useless to the person who owns them.#{RESET}
+    TEXT
+
+    step 7, "Revoke one, and confirm it is actually dead", <<~TEXT
+      Remove a passkey, sign out, and try to sign in with the one you
+      removed.
+      #{DIM}WATCH: it must be refused. Your browser will still OFFER it — the
+      credential still exists on the device, and only the server knows it
+      has been revoked. Being offered a passkey that then fails is the
+      correct, and slightly disconcerting, behaviour.#{RESET}
+    TEXT
+
+    step 8, "Check the address is still not enumerable", <<~TEXT
+      On #{base}/auth/login, submit an address that has no account and
+      one that does, both with a wrong password. The two responses must be
+      indistinguishable — same page, same wording, same status.
+      Then do the same on #{base}/auth/otp: an unknown address, a known
+      one, and one that registered but never confirmed. One screen, three
+      different emails.
+      #{DIM}WATCH: enabling passkeys turns Rodauth's sign-in into a two-step
+      flow by default, which answers that question out loud. It is switched
+      off here for exactly that reason.#{RESET}
+    TEXT
+
+    puts "\n#{BOLD}What would count as a failure#{RESET}"
+    puts <<~TEXT.gsub(/^/, "  ")
+      - The passkey is not offered in the email field on return (step 4).
+      - The system prompt shows a hostname or a number instead of your address.
+      - A revoked passkey still signs in (step 7).
+      - The two sign-in failures in step 8 differ in any way at all.
+      - Any step needs a reload, a second click, or a retry to work.
+    TEXT
+  end
+end
+
+if options[:dry_run]
+  puts "#{BOLD}sparrow_auth passkey smoke test#{RESET} #{DIM}(dry run — nothing was started)#{RESET}"
+  puts "\n  database: #{DB_NAME}"
+  puts "  serves on: http://localhost:<port>  (localhost, not 127.0.0.1 — see the header)"
+  checklist("http://localhost:PORT")
+  exit 0
+end
+
+# --- boot ---------------------------------------------------------------------
+
+puts "#{BOLD}sparrow_auth passkey smoke test#{RESET}"
+print "  preparing #{DB_NAME}… "
+
+system("dropdb", "--if-exists", DB_NAME, out: File::NULL, err: File::NULL)
+unless system("createdb", DB_NAME, out: File::NULL, err: File::NULL)
+  abort "could not create #{DB_NAME}. Is Postgres running?"
+end
+
+ENV["RAILS_ENV"] = "smoke"
+ENV["SPARROW_AUTH_SMOKE_DB"] = DB_NAME
+$LOAD_PATH.unshift(File.join(ROOT, "lib"))
+require File.join(ROOT, "spec", "dummy", "config", "environment")
+
+ActiveRecord::Migration.verbose = false
+ActiveRecord::MigrationContext.new(
+  SparrowAuth::Engine.root.join("db", "migrate").to_s
+).migrate
+ActiveRecord::MigrationContext.new(
+  File.join(ROOT, "spec", "dummy", "db", "migrate")
+).migrate
+
+# Mail, which this script forgot entirely on its first outing.
+#
+# Without it the mailer raises "no from address for auth mail", the request
+# 500s, and — because the smoke environment used to hide exception bodies — it
+# arrives as a blank page with nothing in the mailbox. Every step of this
+# checklist begins with reading an email, so the run is over before it starts.
+api_key = env("SENDLAYER_API_KEY")
+mail_from = env("SMOKE_FROM")
+live_mail = !api_key.nil? && !mail_from.nil?
+
+if live_mail
+  SparrowMail.configure do |config|
+    config.adapter = :sendlayer
+    config.settings = {api_key: api_key}
+    config.default_from = mail_from
+  end
+else
+  SparrowMail.configure do |config|
+    config.adapter = :test
+    config.default_from = "SparrowAuth Passkeys <no-reply@example.test>"
+  end
+end
+
+# Proved rather than assumed, because the failure it guards against is silent
+# from the browser's side.
+begin
+  SparrowAuth::Mailer.sign_in_code(email: "preflight@example.test", code: "000000").deliver_now
+  SparrowMail.deliveries.clear unless live_mail
+rescue => e
+  abort "  mail is not configured: #{e.class}: #{e.message}"
+end
+
+destination = live_mail ? " #{DIM}(sending to #{mail_from} via SendLayer)#{RESET}" : nil
+puts "#{GREEN}ready#{RESET}#{destination}"
+
+server_port = PORT.zero? ? TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] } : PORT
+base = "http://localhost:#{server_port}"
+
+# The RP ID must match the hostname in the address bar. Stated rather than
+# derived, because a credential is permanently bound to the RP ID it was created
+# under: get this wrong and every passkey enrolled here is scrap.
+SparrowAuth.configure do |config|
+  config.webauthn_origin = base
+  config.webauthn_rp_id = "localhost"
+  config.webauthn_rp_name = "sparrow_auth smoke test"
+end
+
+require "puma"
+require "puma/configuration"
+require "puma/launcher"
+
+config = Puma::Configuration.new do |user_config|
+  user_config.bind "tcp://127.0.0.1:#{server_port}"
+  user_config.app Rails.application
+  user_config.workers 0
+  user_config.threads 1, 4
+end
+
+launcher = Puma::Launcher.new(config, log_writer: Puma::LogWriter.null)
+Thread.new { launcher.run }
+
+60.times do
+  TCPSocket.new("127.0.0.1", server_port).close
+  break
+rescue Errno::ECONNREFUSED
+  sleep 0.25
+end
+
+puts "\n  #{BOLD}Open #{base}#{RESET}"
+puts "  #{DIM}localhost, deliberately. A passkey enrolled here will not work on#{RESET}"
+puts "  #{DIM}127.0.0.1, because the Relying Party ID is bound to the hostname.#{RESET}"
+
+checklist(base)
+
+puts "\n#{DIM}Ctrl-C to stop.#{RESET}"
+
+at_exit do
+  unless options[:keep_db]
+    ActiveRecord::Base.connection_pool.disconnect!
+    system("dropdb", "--if-exists", DB_NAME, out: File::NULL, err: File::NULL)
+  end
+end
+
+sleep

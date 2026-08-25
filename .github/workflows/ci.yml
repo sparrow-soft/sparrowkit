@@ -1,0 +1,269 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Explicit, because Encoding.default_external follows the locale and a runner
+  # without it reads UTF-8 source as US-ASCII.
+  LANG: C.UTF-8
+
+jobs:
+  # Each gem's suite runs against that gem's own Gemfile, so the layer boundary
+  # is enforced by the build rather than by discipline. sparrow_auth cannot
+  # quietly start depending on sparrow_pay and have it pass here.
+  gems:
+    name: "suite: ${{ matrix.gem }}${{ matrix.db && format(' / {0}', matrix.db) || '' }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Spelled out rather than a cross product, because the axes are not
+      # independent: only sparrow_auth and sparrow_pay open a database, and a
+      # `db` axis applied to the other two would double their runs to prove
+      # nothing.
+      #
+      # sparrow_ui is here because for a long time it was not, and it is the gem
+      # carrying the console's loopback guard -- so the tests protecting the one
+      # page that must never be reachable in production were the only ones with
+      # no CI signal at all. An order-dependent failure in its suite went
+      # unnoticed for the same reason.
+      #
+      # SQLite runs alongside Postgres because both are supported and every
+      # migration has an adapter-specific branch. Those branches were correct
+      # when last checked by hand, which is not the same as being guarded.
+      matrix:
+        include:
+          - gem: sparrow_mail
+          - gem: sparrow_ui
+          - gem: sparrow_auth
+            db: postgres
+          - gem: sparrow_auth
+            db: sqlite
+          - gem: sparrow_pay
+            db: postgres
+          - gem: sparrow_pay
+            db: sqlite
+
+    # sparrow_auth and sparrow_pay both run against a real Postgres. An auth
+    # engine tested against anything less is testing something other than what
+    # it ships — the citext columns, the partial unique indexes and the check
+    # constraints are load-bearing, and none of them exist in a substitute. A
+    # billing layer tested against stubs is testing its own idea of the Pay gem
+    # rather than Pay, which is the whole reason to build on it.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sparrow_auth_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: gems/${{ matrix.gem }}
+
+      # The service container creates one database. Each gem that needs a
+      # database of its own gets it here rather than by widening POSTGRES_DB,
+      # which a matrix cannot vary per gem.
+      #
+      # `|| true` because the one named in POSTGRES_DB already exists, and
+      # because sparrow_mail and sparrow_ui need no database at all — a gem that
+      # does not use one should not fail on a step that creates one it will
+      # never open.
+      - name: Create this gem's test database
+        if: matrix.db == 'postgres'
+        run: createdb "${{ matrix.gem }}_test" || true
+
+      # DB is read by each dummy application's database.yml, which selects
+      # SQLite when it is set and Postgres otherwise. Passed through env rather
+      # than interpolated into the command.
+      - name: Run test suite
+        working-directory: gems/${{ matrix.gem }}
+        env:
+          DB: ${{ matrix.db == 'sqlite' && 'sqlite' || '' }}
+        run: bundle exec rspec
+
+  # The conformance suite per adapter, as its own job. A single red square names
+  # the provider that broke, which is the whole reason the suite is
+  # provider-parameterised in the first place.
+  adapter-conformance:
+    name: "conformance: ${{ matrix.adapter }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: [send_layer, postmark, sendgrid, mailgun, ses, smtp, test]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: gems/sparrow_mail
+
+      - name: Conformance suite against one adapter
+        working-directory: gems/sparrow_mail
+        # Via env rather than interpolated into the command directly. These
+        # values come from the matrix above and are safe, but interpolating
+        # anything into a shell line is a habit worth not having.
+        env:
+          ADAPTER: ${{ matrix.adapter }}
+        run: bundle exec rspec "spec/sparrow_mail/adapters/${ADAPTER}_spec.rb"
+
+  # The smoke scripts are run by hand, not by CI, so nothing else would notice
+  # them rotting. This does not send mail or touch a database: --dry-run prints
+  # the plan and stops. What it checks is that each script still loads and runs
+  # under the invocation the README documents, which is bare rather than under
+  # `bundle exec`. That distinction is the whole reason this job exists: both
+  # scripts were only ever run one way and documented the other, and requiring
+  # a default gem before Bundler set up broke the documented one.
+  smoke-scripts:
+    name: smoke scripts load
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gem: [sparrow_mail, sparrow_auth]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: gems/${{ matrix.gem }}
+
+      - name: Run the documented invocation
+        working-directory: gems/${{ matrix.gem }}
+        # Placeholders only. --dry-run reaches no provider and creates no
+        # database; these exist so the required-configuration check passes and
+        # the script gets far enough to prove it loads.
+        env:
+          SENDLAYER_API_KEY: dry-run-placeholder
+          SMOKE_FROM: SparrowSoft <no-reply@example.invalid>
+          SMOKE_TO: nobody@example.invalid
+        run: ./bin/smoke --dry-run
+
+      # The passkey script is sparrow_auth's only, and is run by hand — but it
+      # still has to load, and a script nobody runs in CI is a script that has
+      # already broken.
+      - name: Run the passkey script's documented invocation
+        if: matrix.gem == 'sparrow_auth'
+        working-directory: gems/sparrow_auth
+        run: ./bin/smoke-passkeys --dry-run
+
+  # Both linters, on purpose. `standardrb` is the gate; `.rubocop.yml` inherits
+  # Standard's rules so that a contributor who types `rubocop` gets the same
+  # answer. Running both is what keeps that promise true -- if the two configs
+  # ever diverge, this job is where it shows up rather than in a pull request
+  # from somebody who ran the other one.
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - run: bundle exec standardrb
+
+      - run: bundle exec rubocop
+
+  # The documentation, checked against the code it describes.
+  #
+  # Its own job rather than a step on another, so a red build says "docs" and
+  # not "lint". Both times this drifted, a README taught an API that had been
+  # deleted -- and a person reading was the only thing that caught it.
+  docs:
+    name: docs match the code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - run: bundle exec rake spec:docs
+
+  # All three gems release together from one VERSION file. This fails the build
+  # if a generated version.rb has drifted from it.
+  lockstep-version:
+    name: lockstep version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - run: bundle exec rake version:check
+
+  # Proves each gemspec still builds and that the dependency chain resolves. A
+  # gem that cannot be packaged is not installable, however green its suite.
+  package:
+    name: gemspecs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+
+      - name: Build every gem
+        run: |
+          set -euo pipefail
+          built=0
+          for gem_dir in gems/*/; do
+            # Announced rather than skipped in silence. A directory under gems/
+            # with no gemspec is either a gem somebody started and has not
+            # finished, or a gem that lost its gemspec — and the second one
+            # would sail through a silent skip.
+            if ! compgen -G "$gem_dir"'*.gemspec' > /dev/null; then
+              echo "::notice::$gem_dir has no gemspec — not a buildable gem yet, skipping"
+              continue
+            fi
+            (cd "$gem_dir" && gem build ./*.gemspec)
+            built=$((built + 1))
+          done
+
+          if [ "$built" -eq 0 ]; then
+            echo "::error::No gems built at all. Something is wrong with the checkout."
+            exit 1
+          fi
+          echo "Built $built gems."
+        shell: bash

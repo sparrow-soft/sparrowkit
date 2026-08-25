@@ -1,0 +1,70 @@
+*.gem
+*.rbc
+.DS_Store
+.byebug_history
+.rspec_status
+.ruby-version
+
+# Each gem bundles into its own gems/<name>/vendor/bundle, so both the root and
+# the per-gem locations are named. Spelled out rather than left unanchored: an
+# unanchored directory pattern matches that name at any depth, which is how a
+# `log/` rule once swallowed app/views/sparrow_auth/staff/log/ and produced a
+# missing template in CI that no local run could reproduce.
+/vendor/
+gems/*/vendor/
+/.bundle/
+gems/*/.bundle/
+
+# Not committed, per the usual convention for gems: the gemspecs declare version
+# ranges, and CI resolves fresh so a dependency that breaks us shows up as a red
+# build rather than never being seen.
+Gemfile.lock
+
+# Real credentials for bin/smoke. Never committed.
+.env.smoke
+
+# Build and run output, anchored to where it is actually produced.
+#
+# These were unanchored — `log/`, `tmp/`, `doc/` — and an unanchored directory
+# pattern matches that name at *any* depth. `log/` therefore swallowed
+# app/views/sparrow_auth/staff/log/, and the failure was the quiet kind:
+# `git add -A` skipped the template, the commit succeeded, `git status` was
+# clean, the suite passed locally, and CI failed on a missing view for a
+# controller that plainly had one.
+#
+# In a monorepo an unanchored directory pattern eventually swallows something it
+# was never written for. spec/engine_files_are_tracked_spec.rb keeps these
+# honest.
+/coverage/
+/doc/
+/log/
+/pkg/
+/tmp/
+/spec/reports/
+
+gems/*/coverage/
+gems/*/doc/
+gems/*/log/
+gems/*/pkg/
+gems/*/tmp/
+gems/*/spec/reports/
+gems/*/spec/dummy/log/
+gems/*/spec/dummy/tmp/
+gems/*/spec/dummy/storage/
+
+# Worktrees created by the harness for isolated task execution.
+.claude/worktrees/
+
+# Build-time only. gems/sparrow_ui compiles its stylesheet with Tailwind and
+# commits the OUTPUT; the toolchain that produced it is not part of the gem.
+# Anchored: an unanchored `node_modules/` matches at every depth, which
+# engine_files_are_tracked_spec.rb rightly refuses.
+/gems/sparrow_ui/node_modules/
+
+# Release artifacts, produced by rake release:build. Reproducible from a tag,
+# so there is nothing here worth keeping.
+/build/
+
+# Wrangler leaves this behind whenever release:publish uploads to R2. It caches
+# an account id, not credentials, but it is still not ours to commit.
+/.wrangler/

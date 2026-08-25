@@ -1,0 +1,963 @@
+<%#
+  One page, four decisions: the domain passkeys bind to, where auth mail comes
+  from, which ways in are open, and the two HMAC keys.
+
+  Everything on it is a VALUE. The parts of SparrowAuth::Configuration that are
+  code -- the provisioning callbacks, the roles a host declares -- are not
+  here and cannot be, and the list at the bottom says where they live instead.
+
+  Nothing here is hidden by the server. The script at the end only tells you,
+  while you type, that you are about to change the one setting that cannot be
+  changed later. Turn scripting off and the page is complete, every control is
+  reachable, and the same warning is already written underneath the box.
+
+  These are console pages and Tailwind's `@source` scans this directory by
+  name. Views for the console belong here and nowhere else: sparrow_auth's
+  end-user sign-in pages are hand-styled with `sa-*` names and no Tailwind, and
+  a console page filed among them compiles to nothing at all.
+%>
+<h1 class="text-2xl font-semibold text-slate-900 dark:text-slate-100">Authentication</h1>
+<p class="mt-1 text-base text-slate-600 dark:text-slate-300">
+  Passkeys are the primary way in and are always on &mdash; they are the only method that cannot be
+  phished. Everything below either supports them or offers a way in beside them.
+</p>
+<p class="mt-2 text-base text-slate-600 dark:text-slate-300">
+  This page is about getting people <em>in</em>. What they are allowed to do once they are in is
+  decided by your own code &mdash; by the organization role somebody holds, asked with
+  <code class="rounded bg-slate-100 px-1 py-0.5 text-sm dark:bg-slate-800">require_organization!(at_least: :admin)</code>
+  in your controllers. There is nothing to set here.
+</p>
+<p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+  Everything on this page is written to
+  <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">sparrow_auth:</code>
+  in your application's Rails encrypted credentials.
+</p>
+
+<% unless @writable %>
+  <div role="alert"
+       class="mt-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+    <p class="font-medium">This page cannot save anything yet</p>
+    <p class="mt-1"><%= @not_writable_reason %></p>
+  </div>
+<% end %>
+
+<form id="auth_form" action="<%= sparrowkit_path %>" method="post" autocomplete="off" class="mt-8">
+  <%#
+    Written out rather than built by form_with. Tailwind only compiles classes
+    it can find in a file, and a class inside an ERB tag is invisible both to
+    the build's scanner and to the spec that checks the build is not stale.
+  %>
+  <input type="hidden" name="_method" value="patch" autocomplete="off">
+  <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+
+  <section class="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Passkeys</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      The primary way in, and the only one that cannot be phished. It is always on.
+    </p>
+
+    <%#
+      Shown while nothing is stored, which is every application on the day it
+      installs this.
+
+      The hint under the box explains what the setting is; this says why it
+      cannot wait. The existing warning below fires only when CHANGING a stored
+      value, so a developer who never set one at all met no urgency anywhere --
+      and the installer used to say this in the terminal, where it scrolled past
+      once and was gone.
+    %>
+    <%#
+      Fires on the EFFECTIVE domain rather than on this gem's stored one. The
+      urgency is "passkeys have no domain to bind to", and since the domain is
+      normally inherited, an application that has answered on the front page is
+      not in that state even though it has stored nothing here.
+    %>
+    <% if @effective_rp_id.blank? %>
+      <div role="status"
+           class="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+        <p class="font-medium">Set your application's address before you deploy</p>
+        <p class="mt-1">
+          Its domain is what passkeys are permanently bound to, and it is the one setting that a
+          later change cannot undo. A passkey cannot be moved to a different domain, so getting it
+          wrong is not fixed by editing anything — it is fixed by every one of your users enrolling
+          again.
+        </p>
+        <p class="mt-1">
+          With no address set, the domain is whichever origin the request happens to arrive on.
+          That is right on your own machine and a coin toss in production. Set it on the
+          <a href="/sparrowkit" class="font-medium underline">SparrowKit home page</a>.
+        </p>
+      </div>
+    <% end %>
+
+    <div class="mt-4">
+      <%#
+        "Relying Party ID" is the WebAuthn specification's name for it, and it
+        is a term of art from a document nobody building a product has read.
+        The Relying Party is the site relying on the authenticator to vouch for
+        somebody -- so the ID is just the site's domain.
+
+        The plain name leads; the specification's name follows in the hint,
+        because it is the word in every error message, browser console warning
+        and search result a developer will meet later, and a page that never
+        says it leaves them unable to connect the two.
+      %>
+      <p class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        Your website's domain
+      </p>
+
+      <%#
+        Shown before it is offered for editing, because it has already been
+        answered. The address on the front page is the one place this is typed,
+        and a second empty box asking for it again is how the two come to
+        disagree -- with a passkey domain, disagreeing means every enrolled
+        passkey stops working and cannot be migrated.
+
+        The override below is not decoration. A site served at
+        www.example.com usually wants passkeys on example.com, so that they keep
+        working on the apex and on every other subdomain, and that is a
+        different value from the address by design rather than by mistake.
+      %>
+      <div class="mt-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+        <p class="font-mono text-sm text-slate-900 dark:text-slate-100">
+          <%= @inherited_rp_id.presence || "not set yet" %>
+        </p>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          <% if @inherited_rp_id.present? %>
+            Taken from the address on the
+            <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>.
+            Change it there and this follows.
+          <% else %>
+            Set the address on the
+            <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>
+            and this fills in. Until then passkeys use whatever domain the browser asked from, which
+            is fine on your own machine and not something to deploy.
+          <% end %>
+        </p>
+      </div>
+
+      <div class="mt-3 flex items-start gap-2">
+        <input type="hidden" name="webauthn_rp_id_override" value="0" autocomplete="off">
+        <input type="checkbox"
+               id="auth_webauthn_rp_id_override"
+               name="webauthn_rp_id_override"
+               value="1"
+               <%= "checked" if @overriding_rp_id %>
+               <%= "disabled" unless @writable %>
+               data-inherited-rp-id="<%= @inherited_rp_id %>"
+               class="mt-0.5 size-4 rounded border-slate-500 text-purple-900 focus:ring-purple-900 dark:text-purple-300 dark:focus:ring-purple-300">
+        <label for="auth_webauthn_rp_id_override" class="text-sm text-slate-700 dark:text-slate-200">
+          Use a different domain for passkeys
+          <span class="block text-slate-600 dark:text-slate-300">
+            Only if the passkey domain is not the same as your site's address.
+          </span>
+        </label>
+      </div>
+
+      <div id="auth_rp_id_override_field" <%= "hidden" unless @overriding_rp_id %> class="mt-2">
+      <label for="auth_webauthn_rp_id" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        The domain passkeys bind to<%= render "sparrow_ui/console/secret_set" if @stored_rp_id.present? %>
+      </label>
+      <%#
+        The scheme shown as a fixed prefix rather than asked for and then
+        refused.
+
+        The hint underneath says "no https://", and a box that says nothing
+        while you type one is a box that teaches by rejection: paste the
+        address out of a browser bar, press Save, read an error. Printing the
+        part that is NOT yours to type puts the rule where the mistake happens.
+
+        It is decoration, not a value -- the prefix is outside the input, so
+        the field still posts a bare domain and the server still checks it.
+        aria-hidden for the same reason: a screen reader announcing "https://
+        edit, your website's domain" would describe a control that does not
+        exist. The hint carries the rule in words.
+
+        The border moves to the wrapper and comes off the input, so the two
+        read as one control. focus-within puts the focus ring on the whole
+        group, which is what a sighted developer is looking at.
+      %>
+      <%#
+        The group carries the input's surface and the prefix sits a step above
+        it, so the two are told apart without a second border: the field is the
+        recessed part, the prefix the fixed part.
+      %>
+      <div class="mt-1 flex w-full items-stretch overflow-hidden rounded-md border border-slate-500 bg-slate-100 focus-within:border-purple-900 focus-within:ring-1 focus-within:ring-purple-900 dark:bg-slate-950 dark:focus-within:border-purple-300 dark:focus-within:ring-purple-300">
+        <span aria-hidden="true"
+              class="flex select-none items-center border-r border-slate-500 bg-slate-200 px-3 font-mono text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">https://</span>
+        <input type="text"
+               id="auth_webauthn_rp_id"
+               name="webauthn_rp_id"
+               value="<%= @rp_id %>"
+               placeholder="example.com"
+               autocomplete="off"
+               spellcheck="false"
+               data-stored-rp-id="<%= @stored_rp_id %>"
+               aria-describedby="auth_webauthn_rp_id_hint"
+               <%= "disabled" unless @writable %>
+               class="block w-full border-0 bg-transparent px-3 py-2 text-sm text-slate-900 focus:outline-none disabled:bg-slate-200 disabled:text-slate-500 dark:text-slate-100 dark:disabled:bg-slate-800">
+      </div>
+      <p id="auth_webauthn_rp_id_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        A passkey is locked to one domain. Somebody who enrols one at your site can use it at
+        your site and nowhere else — that is what makes it unphishable, because a copy of your
+        login page on another domain cannot ask for it.
+      </p>
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        Write the bare domain: no
+        <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">https://</code>,
+        no port, no path. Use
+        <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">example.com</code>
+        rather than <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">www.example.com</code>,
+        because the bare form also covers
+        <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">www.</code>,
+        <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">app.</code>
+        and every other subdomain, while a passkey enrolled at
+        <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">www.example.com</code>
+        stops working the day somebody visits without the www.
+      </p>
+      <p class="mt-1 text-sm text-slate-500 dark:text-slate-300">
+        Elsewhere this is called the <strong class="font-medium">Relying Party ID</strong>, or RP ID —
+        the name the WebAuthn standard uses, and the one you will see in browser errors and
+        documentation.
+      </p>
+      </div>
+    </div>
+
+    <%#
+      Rendered by the server in the state it should be in: visible when a
+      refused save is showing a changed value, hidden otherwise. The script at
+      the bottom keeps it honest while somebody types. The same sentence is in
+      the hint above either way, so nothing is only in the warning.
+    %>
+    <div id="auth_rp_id_change"
+         role="status"
+         <%= "hidden" unless @rp_id_changing %>
+         class="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+      <p class="font-medium">Changing this asks every user to enrol again</p>
+      <p class="mt-1">
+        Passkeys already enrolled against
+        <code data-stored-rp-id-label class="font-mono"><%= @stored_rp_id %></code>
+        will not work against a different Relying Party ID. A credential is bound to the ID it
+        was created under and cannot be moved to another, so this is not a mistake a later
+        change of setting can undo. It is undone by everybody enrolling again.
+      </p>
+    </div>
+
+    <div class="mt-4">
+      <%#
+        Shown, not asked for, on the same terms as the domain above. The product
+        has one name and the front page took it; a second box here is a second
+        answer, and the two would drift the first time somebody renamed
+        anything.
+      %>
+      <p class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        Your product's name
+      </p>
+
+      <div class="mt-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+        <p class="text-sm text-slate-900 dark:text-slate-100">
+          <%= @inherited_rp_name.presence || "not set yet" %>
+        </p>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          <% if @inherited_rp_name.present? %>
+            Taken from the name on the
+            <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>.
+            Change it there and this follows.
+          <% else %>
+            Set the name on the
+            <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>
+            and this fills in. Until then people see the domain instead, which reads like a machine
+            talking.
+          <% end %>
+        </p>
+      </div>
+
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        Your users see this in the box their phone or laptop pops up when they sign in —
+        “Sign in to <strong class="font-medium"><%= @effective_rp_name.presence || "Acme Corp" %></strong>?”.
+        It should be the name they know you by, not a domain.
+      </p>
+
+      <div class="mt-3 flex items-start gap-2">
+        <input type="hidden" name="webauthn_rp_name_override" value="0" autocomplete="off">
+        <input type="checkbox"
+               id="auth_webauthn_rp_name_override"
+               name="webauthn_rp_name_override"
+               value="1"
+               <%= "checked" if @overriding_rp_name %>
+               <%= "disabled" unless @writable %>
+               class="mt-0.5 size-4 rounded border-slate-500 text-purple-900 focus:ring-purple-900 dark:text-purple-300 dark:focus:ring-purple-300">
+        <label for="auth_webauthn_rp_name_override" class="text-sm text-slate-700 dark:text-slate-200">
+          Use a different name in the passkey prompt
+          <span class="block text-slate-600 dark:text-slate-300">
+            Only if it should not say what the product is called.
+          </span>
+        </label>
+      </div>
+
+      <div id="auth_rp_name_override_field" <%= "hidden" unless @overriding_rp_name %> class="mt-2">
+        <label for="auth_webauthn_rp_name" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+          The name the passkey prompt shows<%= render "sparrow_ui/console/secret_set" if @stored_tree_rp_name.present? %>
+        </label>
+        <input type="text"
+               id="auth_webauthn_rp_name"
+               name="webauthn_rp_name"
+               value="<%= @rp_name %>"
+               placeholder="Acme Corp"
+               autocomplete="off"
+               <%= "disabled" unless @writable %>
+               class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+      </div>
+    </div>
+  </section>
+
+  <section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Auth mail</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      The email SparrowKit sends on your behalf when somebody signs in or joins.
+      Who should it appear to come from?
+    </p>
+
+    <%#
+      The short answer is above; the rest is behind a disclosure rather than a
+      tooltip or a modal. It is several sentences and a list -- too much for a
+      hover, which is unreachable on a touchscreen and gone the moment you look
+      away -- and <details> is native: keyboard reachable, findable by the
+      browser's own in-page search, and working with scripting off, which a
+      modal of our own would not be without JavaScript this console does not
+      otherwise need.
+    %>
+    <details class="mt-3 rounded-md border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+      <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-purple-900 dark:text-purple-300">
+        What is auth mail, and when does it go out?
+      </summary>
+      <div class="border-t border-slate-200 px-3 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+        <p>
+          Signing in here does not use a password by default. Instead, SparrowKit emails
+          the person a short code, or a link, at the moment they ask for it. That email is
+          auth mail. If it does not arrive, nobody gets in — so it is the most important
+          mail your application sends.
+        </p>
+
+        <p class="mt-3">There are four kinds, and a person's own action triggers every one:</p>
+        <ul class="mt-2 list-disc space-y-1 pl-5">
+          <li><span class="font-medium">Sign-in codes</span> — someone asked to sign in.</li>
+          <li><span class="font-medium">Verification</span> — confirming a new address belongs to them.</li>
+          <li><span class="font-medium">Invitations</span> — someone on your team asked to add them.</li>
+          <li><span class="font-medium">Security notices</span> — telling an account owner about something that happened to it.</li>
+        </ul>
+
+        <p class="mt-3">
+          It never goes out in bulk and nobody subscribes to it, which is why this page
+          offers no choice about which sending stream carries it. Auth mail is
+          transactional, always. If you set up a separate marketing provider on the Mail
+          panel, this does not go through it — deliberately: a bulk sending reputation is
+          the thing most likely to stop sign-in codes arriving.
+        </p>
+
+        <p class="mt-3">
+          The address below is only what recipients see. Which provider actually delivers
+          it is configured on the Mail panel, and leaving these blank falls back to the
+          default sender set there.
+        </p>
+      </div>
+    </details>
+
+    <div class="mt-4 grid gap-4 sm:grid-cols-2">
+      <div>
+        <label for="auth_sender_name" class="block text-sm font-medium text-slate-900 dark:text-slate-100">Sender name<%= render "sparrow_ui/console/secret_set" if @stored_sender_name.present? %><%= render "sparrow_ui/console/optional" %></label>
+        <input type="text"
+               id="auth_sender_name"
+               name="sender_name"
+               value="<%= @sender_name %>"
+               placeholder="Acme"
+               autocomplete="off"
+               aria-describedby="auth_sender_name_hint"
+               <%= "disabled" unless @writable %>
+               class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+        <p id="auth_sender_name_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          What recipients see it is from.
+        </p>
+      </div>
+
+      <div>
+        <label for="auth_sender_email" class="block text-sm font-medium text-slate-900 dark:text-slate-100">Sender email<%= render "sparrow_ui/console/secret_set" if @stored_sender_email.present? %></label>
+        <input type="email"
+               id="auth_sender_email"
+               name="sender_email"
+               value="<%= @sender_email %>"
+               placeholder="no-reply@acme.test"
+               autocomplete="off"
+               aria-describedby="auth_sender_email_hint"
+               <%= "disabled" unless @writable %>
+               class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+        <p id="auth_sender_email_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          Leave both blank to use the default sender from the Mail panel.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Ways in</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Two things here are settled and have no switch, deliberately.
+      <strong>Passkeys are always on</strong> &mdash; they are the primary way in, and the only
+      one that cannot be phished, guessed or reused from somebody else's breach.
+      <strong>Email verification is always on</strong> &mdash; an unverified address is a claim,
+      not an identity, and every application that has ever added a flag for this has eventually
+      shipped with it off somewhere.
+    </p>
+
+    <%#
+      A radio and not two checkboxes, because the two states checkboxes can
+      reach are both wrong: both on is two ways into the same account for no
+      benefit, and both off is an application nobody can get into. A control
+      that cannot express a mistake beats a control that refuses one.
+    %>
+    <fieldset class="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
+      <legend class="text-sm font-medium text-slate-900 dark:text-slate-100">
+        What an emailed sign-in sends
+      </legend>
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        Somebody types their address; this is what arrives. One or the other &mdash; both would be
+        two doors into the same account, and neither would leave a brand new account with no way
+        in at all, since a new account has no passkey yet.
+      </p>
+
+      <div class="mt-3 space-y-3">
+        <div class="flex items-start gap-3">
+          <input type="radio"
+                 id="auth_emailed_sign_in_code"
+                 name="emailed_sign_in"
+                 value="code"
+                 aria-describedby="auth_emailed_sign_in_code_hint"
+                 <%= "checked" if @mechanism == :code %>
+                 <%= "disabled" unless @writable %>
+                 class="mt-1 h-4 w-4 border-slate-500 text-purple-900">
+          <div class="min-w-0 flex-1">
+            <label for="auth_emailed_sign_in_code" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+              A six-digit code they type
+            </label>
+            <p id="auth_emailed_sign_in_code_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              Works when the mail is read somewhere else &mdash; a phone, a shared mailbox, a
+              machine that is not the one they started on. This is also the only one of the two
+              that can turn an unknown address into an account, because the account is made when
+              the code is redeemed rather than when it is sent.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-3">
+          <input type="radio"
+                 id="auth_emailed_sign_in_link"
+                 name="emailed_sign_in"
+                 value="link"
+                 aria-describedby="auth_emailed_sign_in_link_hint"
+                 <%= "checked" if @mechanism == :link %>
+                 <%= "disabled" unless @writable %>
+                 class="mt-1 h-4 w-4 border-slate-500 text-purple-900">
+          <div class="min-w-0 flex-1">
+            <label for="auth_emailed_sign_in_link" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+              A link they open
+            </label>
+            <p id="auth_emailed_sign_in_link_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              One click, and it only works in the browser that asked for it &mdash; which is what
+              stops anything that scans your mail from spending it, and what makes &ldquo;read it
+              on my phone, finish on my laptop&rdquo; impossible. A link also cannot create an
+              account: it has to hang on one that already exists, so with this chosen, new people
+              arrive by invitation or through create-account.
+            </p>
+          </div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
+      <legend class="sr-only">Optional ways in</legend>
+
+      <div class="flex items-start gap-3">
+        <%#
+          Hidden field first, then the box. A checkbox alone sends nothing when
+          it is off, so "off" and "this client never rendered the control" would
+          arrive as the same request. With the pair, the parameter is always
+          there and always 0 or 1, and the controller refuses anything else.
+        %>
+        <input type="hidden" name="signup_with_code" value="0" autocomplete="off">
+        <input type="checkbox"
+               id="auth_signup_with_code"
+               name="signup_with_code"
+               value="1"
+               aria-describedby="auth_signup_with_code_hint"
+               <%= "checked" if @signup_with_code %>
+               <%= "disabled" unless @writable %>
+               class="mt-1 h-4 w-4 rounded border-slate-500 text-purple-900">
+        <div class="min-w-0 flex-1">
+          <label for="auth_signup_with_code" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+            An emailed code for an unknown address creates an account
+          </label>
+          <p id="auth_signup_with_code_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+            The shortest honest way to sign up: the code proves control of the mailbox, which is
+            the only thing the account ever had to prove, and no password is invented along the
+            way. Turn it off for an invite-only product, where an address arriving at the sign-in
+            page should not become an account.
+          </p>
+        </div>
+      </div>
+    </fieldset>
+
+    <%#
+      Passwords are not one of the choices above, and this block is why they do
+      not look like one. They are the weakest way in --
+      the only credential that can be phished, guessed at scale, or arrive
+      already known from somebody else's breach -- and a checkbox in a list of
+      equals would say the opposite of that.
+
+      Muted rather than amber, and the change of key matters. Amber on this
+      page is a summons, and it is spent on exactly three things: a save that
+      cannot happen, an unset Relying Party ID, and a Relying Party ID being
+      changed out from under enrolled passkeys. Each wants doing now.
+
+      Passwords want the opposite -- nothing is wrong, the default is already
+      right, and the recommendation is to leave it alone. Amber here would be a
+      fourth summons to something that isn't one, and a page where everything
+      shouts is a page where nothing does.
+
+      The signing keys further down carry these same colours, for the same
+      reason. Between them they are the two blocks whose honest advice is "do
+      not touch this", so they look alike and neither looks urgent.
+
+      In dark mode the card sits at the page's own lightness, so it recedes
+      into the page instead of standing off it like every other card, and the
+      dark red rule is the only thing that draws it. Measured rather than
+      eyeballed: the WCAG contrast RATIO is the wrong instrument for two
+      adjacent dark surfaces -- it scores the console's existing, plainly
+      visible cards at 1.01:1 -- so the surfaces were compared by OKLCH
+      lightness, where the border stands 0.27 clear of its background.
+
+      The TEXT is not muted, and that is deliberate. slate-400 on this ground
+      is 3.04:1, under the 4.5:1 body-text floor, so the de-emphasis has to
+      come from the surface. Washing out the words instead would make the one
+      security decision on this page the hardest thing on it to read.
+    %>
+    <div class="mt-6 rounded-lg border border-red-200 bg-slate-50 p-4 dark:border-red-900 dark:bg-gray-950">
+      <div class="flex items-start gap-3">
+        <input type="hidden" name="passwords_enabled" value="0" autocomplete="off">
+        <input type="checkbox"
+               id="auth_passwords_enabled"
+               name="passwords_enabled"
+               value="1"
+               aria-describedby="auth_passwords_enabled_hint"
+               <%= "checked" if @passwords_enabled %>
+               <%= "disabled" unless @writable %>
+               class="mt-1 h-4 w-4 rounded border-slate-500 text-purple-900">
+        <div class="min-w-0 flex-1">
+          <label for="auth_passwords_enabled" class="block text-sm font-medium text-slate-800 dark:text-slate-300">
+            Also let people sign in with a password
+          </label>
+          <p id="auth_passwords_enabled_hint" class="mt-1 text-sm text-slate-700 dark:text-slate-300">
+            Off by default, and complete without them: an account can be created, verified,
+            given a passkey and used for years with no password ever existing.
+            Turning them on adds the weakest sign-in method, and the only credential here
+            that somebody else's breach can hand to an attacker already working. Neither of the
+            sign-in methods above it can be reused that way, or phished, or guessed at scale. Sometimes
+            this is the right trade. It is never the free one.
+          </p>
+          <%#
+            The chips sit on this card, not on the white ones, so they cannot
+            reuse the slate-100 used everywhere else: this card's light ground
+            is slate-50 and the two would touch. slate-200/slate-800 keeps them
+            a step off it in both schemes.
+          %>
+          <p class="mt-2 text-sm text-slate-700 dark:text-slate-300">
+            Two settings only matter once this is on, and neither is here: the minimum length,
+            which defaults to twelve characters, and the check that refuses a password already
+            known to have been breached. That check is a call into somebody else's service, so it
+            is code rather than a value —
+            <code class="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">password_breached</code>
+            and
+            <code class="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">password_minimum_length</code>
+            live in
+            <code class="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">config/initializers/sparrow_auth.rb</code>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%#
+    Social sign-in, which the README has advertised since before it could be
+    configured anywhere but a file.
+
+    Two things have to be true for a provider to work: keys, which are here, and
+    a gem, which cannot be. OmniAuth strategies are ordinary gems in the
+    application's Gemfile, and no control panel can add one. So the page says
+    which are missing and gives the exact line, rather than offering a control
+    that produces a callback route raising on its first visitor.
+
+    Keys are stored whether or not the gem is there. Somebody who pastes their
+    credentials before running bundle install should find them afterwards.
+  %>
+  <section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Google and Apple</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Optional, and off until both a gem and a pair of credentials are here. Somebody who signs
+      in this way still gets an account of yours; the provider proves who they are and nothing
+      else.
+    </p>
+
+    <% unless @omniauth_present %>
+      <p class="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+        None of this works yet: <code class="font-mono">rodauth-omniauth</code> is not in your
+        bundle, and it carries the whole feature. Add it, and the strategy for each provider you
+        want, then restart.
+      </p>
+    <% end %>
+
+    <div class="mt-4 space-y-5">
+      <% @social.each do |provider| %>
+        <div class="rounded-md border border-slate-200 p-4 dark:border-slate-800">
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100"><%= provider[:name] %></h3>
+
+          <% unless provider[:gem_present] %>
+            <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              Needs a gem this application does not have. Add it to your Gemfile and restart:
+            </p>
+            <pre class="mt-2 overflow-x-auto rounded-md bg-slate-100 px-3 py-2 font-mono text-xs text-slate-800 dark:bg-slate-800 dark:text-slate-200"><code>gem "<%= provider[:gem] %>"</code></pre>
+          <% end %>
+
+          <div class="mt-3 grid gap-4 md:grid-cols-2">
+            <div>
+              <label for="auth_social_<%= provider[:key] %>_id" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                Client ID
+              </label>
+              <input type="text"
+                     id="auth_social_<%= provider[:key] %>_id"
+                     name="social[<%= provider[:key] %>][client_id]"
+                     value="<%= provider[:client_id] %>"
+                     autocomplete="off"
+                     spellcheck="false"
+                     <%= "disabled" unless @writable %>
+                     class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 font-mono text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+            </div>
+
+            <div>
+              <label for="auth_social_<%= provider[:key] %>_secret" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                Client secret<%= render "sparrow_ui/console/secret_set" if provider[:secret_set] %>
+              </label>
+              <%= render "sparrow_ui/console/secret_field",
+                    id: "auth_social_#{provider[:key]}_secret",
+                    name: "social[#{provider[:key]}][client_secret]",
+                    hint: nil,
+                    describedby: "auth_social_#{provider[:key]}_secret_hint",
+                    disabled: !@writable %>
+              <p id="auth_social_<%= provider[:key] %>_secret_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                <%= provider[:secret_set] ? "Already set. Leave blank to keep it." : "From your #{provider[:name]} developer console." %>
+              </p>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </section>
+
+  <%#
+    Folded away, because the honest advice is "do not touch this" and a section
+    a developer has to scroll past on every visit reads like a section they are
+    supposed to fill in. Two empty boxes among a page of boxes that DO want
+    values is an invitation, and the value most likely to be invented by hand is
+    the one that must never be.
+
+    <details> rather than a script: keyboard reachable, findable by the
+    browser's own find-in-page, and open on a printed page. With scripting off
+    it still opens. The same element carries the auth-mail explanation further
+    up, so the page has one disclosure idiom rather than two.
+
+    Deliberately NOT collapsed once a key is set. Somebody who has one has a
+    reason to look at it, and hiding the field they came for would be the
+    disclosure working against them -- see the `open` attribute below.
+  %>
+  <% keys_set = @otp_secret.is_a?(Hash) && @otp_secret[:set] %>
+
+  <%#
+    The passwords card's colours, and for the passwords card's reason.
+    Whatever is set here, the answer is almost always "leave it alone" -- so it
+    gets the surface that recedes into the page and a dark red rule to mark it,
+    rather than the amber this console spends on things that want doing now.
+
+    A folded section is already saying "not for you"; shouting it in amber as
+    well made the one block nobody should touch the loudest thing on the page.
+  %>
+  <details class="mt-8 rounded-lg border border-red-200 bg-slate-50 p-5 dark:border-red-900 dark:bg-gray-950"
+           <%= "open" if keys_set %>>
+    <summary class="cursor-pointer text-base font-semibold text-slate-800 dark:text-slate-300">
+      Advanced — signing keys
+      <span class="ml-1 font-normal">(you almost certainly do not need these)</span>
+    </summary>
+
+    <div class="mt-3 text-sm text-slate-700 dark:text-slate-300">
+      <p class="font-medium">Leave both blank unless you know you need them</p>
+      <p class="mt-1">
+        There is nowhere to get these from — no dashboard, no provider, no account. They are
+        random strings, and if you leave them empty your application makes its own: Rails derives
+        each one from the master key you already have, stable across restarts and deploys and
+        distinct from every other derived key, so a leak of one does not compromise the others.
+        That is the right answer for almost every application.
+      </p>
+      <p class="mt-2">
+        Set one only if you need to rotate it on its own schedule, or share it with another
+        service that has to verify the same codes or tokens. Generate it, never invent it:
+      </p>
+      <p class="mt-2">
+        <code class="rounded bg-slate-200 px-1.5 py-1 font-mono text-xs dark:bg-slate-800">bin/rails secret</code>
+        — prints a fresh random value. Paste it into the matching box below.
+      </p>
+      <p class="mt-2">
+        Whichever you set, every code and token already issued under the previous key stops
+        verifying the moment you save. Do it deliberately.
+      </p>
+
+      <%#
+        Rails' own documentation rather than ours, deliberately. This is Rails
+        behaviour, not SparrowKit behaviour: the derivation, the storage and the
+        consequences of rotating a secret are all theirs, and a developer being
+        careful about a signing key should be reading the source of truth rather
+        than our summary of it. Ours would also go stale against theirs.
+      %>
+      <p class="mt-3 font-medium">Rails' documentation on this</p>
+      <ul class="mt-1 list-disc space-y-1 pl-5">
+        <li>
+          <a href="https://guides.rubyonrails.org/security.html#custom-credentials"
+             class="font-medium underline hover:no-underline"
+             target="_blank" rel="noopener noreferrer">Securing Rails Applications — Custom credentials</a>
+          — where secrets belong, why they must be long and random, and what changing one costs.
+        </li>
+        <li>
+          <a href="https://api.rubyonrails.org/classes/ActiveSupport/KeyGenerator.html"
+             class="font-medium underline hover:no-underline"
+             target="_blank" rel="noopener noreferrer">ActiveSupport::KeyGenerator</a>
+          — the PBKDF2 derivation that produces these keys for you when you leave them blank.
+        </li>
+      </ul>
+    </div>
+
+    <p class="mt-3 text-sm text-slate-700 dark:text-slate-300">
+      One-time codes and API tokens are stored as HMAC digests rather than as themselves, and
+      these are the keys those digests are computed with.
+    </p>
+
+    <div class="mt-4 space-y-3">
+      <div>
+        <label for="auth_otp_secret" class="block text-sm font-medium text-slate-800 dark:text-slate-300">
+          One-time code key
+          <% if @otp_secret.is_a?(Hash) && @otp_secret[:set] %>
+            <%= render "sparrow_ui/console/secret_set" %>
+          <% end %>
+        </label>
+        <%= render "sparrow_ui/console/secret_field",
+              id: "auth_otp_secret",
+              name: "otp_secret",
+              hint: (@otp_secret[:hint] if @otp_secret.is_a?(Hash) && @otp_secret[:set]),
+              describedby: "auth_otp_secret_hint",
+              disabled: !@writable %>
+        <p id="auth_otp_secret_hint" class="mt-1 text-sm text-slate-700 dark:text-slate-300">
+          <% if @otp_secret.is_a?(Hash) && @otp_secret[:set] %>
+            Already set. Leave this blank to keep it; paste a new one to replace it.
+          <% else %>
+            Empty is the right answer for most applications — Rails derives this key for you.
+            To set your own, paste the output of
+            <code class="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">bin/rails secret</code>.
+            It is written once and never shown again.
+          <% end %>
+        </p>
+      </div>
+
+    </div>
+  </details>
+
+  <div class="mt-8 flex items-center gap-4">
+    <button type="submit"
+            <%= "disabled" unless @writable %>
+            class="rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300 disabled:text-slate-600 dark:bg-purple-300 dark:text-purple-950 dark:disabled:bg-slate-700 dark:disabled:text-slate-400">
+      Save authentication settings
+    </button>
+    <a href="<%= sparrow_ui.root_path %>"
+       class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100">
+      Back to SparrowKit
+    </a>
+  </div>
+</form>
+
+<%#
+  The sign-in harness. Development only, like everything under /sparrowkit.
+
+  It exists because SparrowKit now serves no sign-in page of its own -- the
+  screens belong to the application -- and because there is no obvious way to
+  test what a viewer sees as opposed to an admin without three browsers and a
+  lot of patience.
+
+  WHAT IT IS NOT is a back door. The button below asks for a real code, reads it
+  out of the mailbox the way a person reads their email, and redeems it. So it
+  works only for verified accounts, it respects the once-a-minute limit, and it
+  leaves a session that shows up on the sessions screen and can be ended there,
+  exactly like anybody else's. A control that wrote the session directly would
+  be shorter and would prove nothing.
+%>
+<section class="mt-10 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+  <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Sign in as somebody</h2>
+  <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+    For trying your own pages as the people who will use them. Pick an account
+    and this signs your browser in as them, through the same flow they would go
+    through &mdash; a real code, really redeemed. Only here, and only in
+    development.
+  </p>
+
+  <% if @signed_in_as %>
+    <p class="mt-3 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+      You are currently signed in as <strong><%= @signed_in_as.email %></strong>.
+      Signing in as somebody else replaces that.
+    </p>
+  <% end %>
+
+  <% unless @screens_generated %>
+    <p class="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+      Nothing is routed at <code class="font-mono"><%= SparrowAuth.config.sign_in_path %></code>,
+      so your application has no sign-in page yet &mdash; SparrowKit does not ship one.
+      Run <code class="font-mono">bin/rails generate sparrowkit:screens</code> to write yours.
+      This harness works either way; your users need that command.
+    </p>
+  <% end %>
+
+  <% if @accounts.empty? %>
+    <p class="mt-4 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+      There are no verified accounts yet. Run
+      <code class="font-mono">bin/rails sparrow_auth:seed</code> to make one to start from.
+    </p>
+  <% else %>
+    <form action="<%= sign_in_as_path %>" method="post" class="mt-4 flex flex-wrap items-end gap-3">
+      <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+
+      <div class="grow">
+        <label for="auth_harness_account" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+          Sign in as
+        </label>
+        <select id="auth_harness_account"
+                name="account_id"
+                class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+          <% @accounts.each do |account| %>
+            <option value="<%= account.id %>"><%= account.email %></option>
+          <% end %>
+        </select>
+      </div>
+
+      <button type="submit"
+              class="rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-800 dark:bg-purple-300 dark:text-purple-950 dark:hover:bg-purple-200">
+        Sign in
+      </button>
+    </form>
+
+    <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+      Only verified accounts are listed, because only a verified address is sent
+      a code. A code can be issued once a minute per address, so signing in as
+      the same person twice in quick succession is refused &mdash; by the rule
+      rather than by this page.
+    </p>
+  <% end %>
+
+  <%#
+    A link rather than a second copy of the ceremony. Rodauth still serves the
+    passkey pages, they are the ones a real user meets, and a WebAuthn
+    enrolment reimplemented here would be the wrong thing tested.
+  %>
+  <p class="mt-4 text-sm text-slate-600 dark:text-slate-300">
+    To try a passkey, sign in above and then visit
+    <a class="font-mono underline hover:text-purple-900 dark:hover:text-purple-300"
+       href="<%= SparrowAuth.config.path_prefix %>/webauthn-setup"><%= SparrowAuth.config.path_prefix %>/webauthn-setup</a>.
+    Passkeys bind to <code class="font-mono"><%= @effective_rp_id %></code>, which is what the box above sets.
+  </p>
+</section>
+
+<h2 class="mt-10 text-base font-semibold text-slate-900 dark:text-slate-100">Not configured here</h2>
+<p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+  Everything else sparrow_auth exposes is set once, in
+  <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">config/initializers/sparrow_auth.rb</code>,
+  where the install generator left it with a comment explaining each choice. A setting that
+  could be answered in two places is a setting that will eventually disagree with itself.
+</p>
+<ul class="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-300">
+  <li>
+    <span class="font-medium">Anything that is code rather than a value</span> — the hooks your
+    application is told through when somebody first signs in, verifies an address, accepts an
+    invitation or creates an organization, and any role it declares for itself. A console
+    cannot hold a lambda.
+  </li>
+  <li>
+    <span class="font-medium">Social sign-in</span> — needs gems in your Gemfile as well as
+    values, and each provider's options are shaped by its own strategy. Naming providers here
+    without installing the gems would produce a callback route that raises on the first visitor.
+  </li>
+  <li>
+    <span class="font-medium">The passkey origin</span> — derived from the request, which is
+    right unless something in front of your application terminates TLS and rewrites the Host
+    header. Set it there on the day that becomes true.
+  </li>
+  <li>
+    <span class="font-medium">Expiries, and where Rodauth serves its routes</span> — the
+    verification and invitation windows, and the path prefix, which has to agree with wherever
+    the engine is mounted because Rodauth runs above the Rails router rather than through it.
+  </li>
+</ul>
+
+<script>
+  // Progressive enhancement and nothing else.
+  //
+  // The Relying Party ID is the one setting on this page that a later edit
+  // cannot put right, so this says so while it is being typed rather than
+  // after it is saved. The same warning is already rendered by the server -- in
+  // the hint under the box, and in the panel this toggles -- so with scripting
+  // off the page loses a moment of timing and no information.
+  //
+  // Vanilla, inline, no build step. This console is served only to this
+  // machine, only in development, and a developer console that needed a
+  // toolchain to compare two strings would be the wrong trade.
+  (function () {
+    var input = document.getElementById("auth_webauthn_rp_id");
+    var warning = document.getElementById("auth_rp_id_change");
+    var toggle = document.getElementById("auth_webauthn_rp_id_override");
+    var field = document.getElementById("auth_rp_id_override_field");
+    if (!input || !warning || !toggle || !field) return;
+
+    // The product name's disclosure works the same way and costs nothing to
+    // drive from here. It has no warning attached: renaming a product breaks
+    // nothing, unlike moving the domain.
+    var nameToggle = document.getElementById("auth_webauthn_rp_name_override");
+    var nameField = document.getElementById("auth_rp_name_override_field");
+    if (nameToggle && nameField) {
+      var refreshName = function () { nameField.hidden = !nameToggle.checked; };
+      nameToggle.addEventListener("change", refreshName);
+      refreshName();
+    }
+
+    var stored = input.getAttribute("data-stored-rp-id") || "";
+    var inherited = toggle.getAttribute("data-inherited-rp-id") || "";
+
+    // What passkeys would bind to if this were saved now: the box when the
+    // switch is on, the address from the front page when it is off. The server
+    // works the same value out; this only keeps up while somebody types.
+    function effective() {
+      return toggle.checked ? input.value.trim() : inherited;
+    }
+
+    function refresh() {
+      field.hidden = !toggle.checked;
+
+      // Nothing stored yet means nothing enrolled against it, so there is
+      // nobody for a change to cost.
+      warning.hidden = stored === "" || effective() === stored;
+    }
+
+    input.addEventListener("input", refresh);
+    toggle.addEventListener("change", refresh);
+    refresh();
+  })();
+</script>

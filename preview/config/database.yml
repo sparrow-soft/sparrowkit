@@ -1,0 +1,19 @@
+# PostgreSQL, matching the gems' own dummies and every real install.
+#
+# The console never queries a table. This exists because sparrow_auth's Rodauth
+# configuration opens a Sequel connection on every request through the
+# application, and it names the postgres adapter outright -- see ADR 0001 and
+# the note in preview/Gemfile. A connection is required; a schema is not, which
+# is why nothing here is ever migrated.
+#
+# Its own database, not shared with any gem's dummy or test run. bin/console
+# creates it on first start and `bin/rails db:drop` throws it away.
+development:
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("PGHOST", "localhost") %>
+  port: <%= ENV.fetch("PGPORT", 5432) %>
+  username: <%= ENV.fetch("PGUSER", ENV["USER"]) %>
+  password: <%= ENV.fetch("PGPASSWORD", "") %>
+  database: <%= ENV.fetch("SPARROWKIT_PREVIEW_DB", "sparrowkit_preview") %>
+  pool: 5

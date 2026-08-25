@@ -1,0 +1,14 @@
+Somebody just tried to sign in using <%= @provider %>, with an account whose
+email address is this one.
+
+We did not let them in, and we did not connect anything. This account has never
+been connected to <%= @provider %>, and we do not link accounts just because two
+email addresses happen to match — that would mean anybody able to persuade
+<%= @provider %> to vouch for your address could reach your account here.
+
+If that was you, and you would like to use <%= @provider %> to sign in from now
+on, sign in the normal way first and then connect it deliberately:
+
+<%= @url %>
+
+If it was not you, there is nothing to do. Nobody got in and nothing changed.

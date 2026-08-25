@@ -1,0 +1,31 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+# Resolve the lockstep siblings from source during development.
+gem "sparrow_auth", path: "../sparrow_auth"
+gem "sparrow_mail", path: "../sparrow_mail"
+
+gem "rake", "~> 13.0"
+
+group :development, :test do
+  gem "rspec", "~> 3.13"
+  gem "standard", "~> 1.44"
+
+  # A real Postgres and a real Rails stack. Pay owns the customer and
+  # subscription tables, and a billing layer tested against stubs is testing its
+  # own idea of Pay rather than Pay itself — which is the whole reason to build
+  # on it.
+  gem "pg", "~> 1.5"
+  # Both supported databases, so the suite can run against either --
+  # DB=sqlite swaps the dummy application onto SQLite.
+  gem "sqlite3", ">= 2.0"
+  gem "rspec-rails", "~> 7.0"
+
+  # The console panel. A development-group dependency and never a runtime one:
+  # the panel exists only where sparrow_ui does, which is how it stays out of
+  # production without a single environment check.
+  gem "sparrow_ui", path: "../sparrow_ui"
+end

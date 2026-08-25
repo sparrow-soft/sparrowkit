@@ -1,0 +1,9 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "de8234b3d0924541a2c23cb6dad928726722ade76a818e59f24a35aa25194b3e",
+      "note": "False positive. RodauthController has no actions and no routes -- SparrowAuth::Engine.routes is empty. It exists only as a render target for templates Rodauth serves from Roda middleware above the Rails router, so there is no request here for protect_from_forgery to protect. CSRF for those routes is checked in Rodauth's own layer. Re-examine if this controller ever gains an action."
+    }
+  ],
+  "brakeman_version": "7.1.0"
+}

@@ -1,0 +1,48 @@
+# Postgres by default; DB=sqlite runs the same suite against SQLite. Both are
+# supported databases, so both have to be the thing the tests actually test.
+<% if ENV["DB"] == "sqlite" %>
+default: &default
+  adapter: sqlite3
+  pool: 5
+  timeout: 5000
+
+test:
+  <<: *default
+  database: storage/sparrow_auth_test.sqlite3
+
+development:
+  <<: *default
+  database: storage/sparrow_auth_development.sqlite3
+
+smoke:
+  <<: *default
+  database: storage/sparrow_auth_smoke.sqlite3
+<% else %>
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("PGHOST", "localhost") %>
+  port: <%= ENV.fetch("PGPORT", 5432) %>
+  username: <%= ENV.fetch("PGUSER", ENV["USER"]) %>
+  password: <%= ENV.fetch("PGPASSWORD", "") %>
+  pool: 5
+
+test:
+  <<: *default
+  database: <%= ENV.fetch("SPARROW_AUTH_TEST_DB", "sparrow_auth_test") %>
+
+# For opening the developer console by hand -- see config/environments/development.rb.
+# The console itself never reaches the database, but the application it is mounted
+# in boots with ActiveRecord, so there has to be one to connect to.
+development:
+  <<: *default
+  database: <%= ENV.fetch("SPARROW_AUTH_DEV_DB", "sparrow_auth_development") %>
+
+# A separate database, created and migrated from empty on every run. That is the
+# point of it: the test database is reused, so the suite stops exercising the
+# migrations after the first run, and a migration that only works against an
+# already-migrated schema would never be noticed.
+smoke:
+  <<: *default
+  database: <%= ENV.fetch("SPARROW_AUTH_SMOKE_DB", "sparrow_auth_smoke") %>
+<% end %>

@@ -1,0 +1,17 @@
+<%#
+  One module's traffic light.
+
+  The word carries the meaning and the colour agrees with it. Never the colour
+  alone: WCAG 1.4.1, and on a page whose entire job is telling a developer which
+  of three things still needs doing, a reader who cannot separate amber from
+  green would be left with three identical cards.
+%>
+<% classes = {
+     ready: "bg-emerald-50 text-emerald-800 ring-emerald-600/30 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-400/30",
+     attention: "bg-amber-50 text-amber-900 ring-amber-600/30 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-400/30",
+     unconfigured: "bg-slate-100 text-slate-700 ring-slate-500/30 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-400/30",
+     unknown: "bg-slate-100 text-slate-700 ring-slate-500/30 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-400/30"
+   } %>
+<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset <%= classes.fetch(status.state, classes[:unknown]) %>">
+  <%= status.label %>
+</span>

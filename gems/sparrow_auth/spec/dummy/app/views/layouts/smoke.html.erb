@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>sparrow_auth smoke</title>
+    <%= render "layouts/theme" %>
+    <style>
+      /* Only what the docs stylesheet does not already cover: this harness has
+       * a nav bar and message cards, which a documentation page does not. */
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        padding-bottom: 1rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--sk-border);
+      }
+
+      .msg {
+        border: 1px solid var(--sk-border);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        margin: 1rem 0;
+        background: var(--sk-surface-raised);
+      }
+
+      .meta { color: var(--sk-text-muted); font-size: 0.8125rem; }
+
+      [role="status"], [role="alert"] {
+        padding: 0.625rem 0.875rem;
+        border-radius: 8px;
+        border: 1px solid var(--sk-border);
+      }
+
+      [role="status"] { background: var(--sk-info-surface); color: var(--sk-info); }
+      [role="alert"] { background: var(--sk-danger-surface); color: var(--sk-danger); }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <%= link_to "Start", root_path %>
+      <%= link_to "Mailbox", mailbox_path %>
+      <%= link_to "Sign in with a code", "/auth/otp" %>
+      <%= link_to "Sign in with a password", "/auth/login" %>
+      <%= link_to "Create an account", "/auth/create-account" %>
+    </nav>
+    <% if flash[:notice].present? %><p role="status"><%= flash[:notice] %></p><% end %>
+    <% if flash[:alert].present? %><p role="alert"><%= flash[:alert] %></p><% end %>
+    <%= yield %>
+  </body>
+</html>

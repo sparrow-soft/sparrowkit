@@ -1,0 +1,9 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "ee5e8a7a7f8ce0da19d61b4520f91b085821fe7556ecbff53c7690f9a5f9ef62",
+      "note": "False positive. AssetsController has one action, reached by one route: `get \"inter.woff2\"`. It send_files a static font and changes no state, so there is nothing for CSRF to protect. The whole engine also sits behind SparrowUi::Console::LoopbackGuard, which refuses anything that is not local development before routing runs. Re-examine if this controller ever gains a non-GET action."
+    }
+  ],
+  "brakeman_version": "7.1.0"
+}

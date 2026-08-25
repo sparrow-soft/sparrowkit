@@ -1,0 +1,25 @@
+<h1>Mailbox</h1>
+
+<p class="meta">Everything sparrow_mail has been handed this run. With real
+provider credentials configured these go to a real inbox instead and this list
+stays empty.</p>
+
+<% if @deliveries.any? %>
+  <%= button_to "Clear", clear_mailbox_path %>
+  <% @deliveries.each do |delivery| %>
+    <div class="msg">
+      <strong><%= delivery.subject %></strong>
+      <p class="meta">
+        to <%= delivery.to.map(&:email).join(", ") %> ·
+        stream <%= delivery.stream %> ·
+        tags <%= delivery.tags.join(", ").presence || "none" %>
+      </p>
+      <pre><%= delivery.text_body %></pre>
+      <% if (url = delivery.text_body.to_s[%r{https?://\S+}]) %>
+        <p><%= link_to "Open the link in this message", url %></p>
+      <% end %>
+    </div>
+  <% end %>
+<% else %>
+  <p>Nothing sent yet.</p>
+<% end %>

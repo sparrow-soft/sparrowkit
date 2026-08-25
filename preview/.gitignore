@@ -1,0 +1,19 @@
+# Anchored to this directory, every one of them. The repository root's
+# .gitignore is emphatic about this and says why: an unanchored `log/` once
+# matched app/views/sparrow_auth/staff/log/, `git add -A` skipped the template,
+# the commit succeeded, git status was clean, and CI failed on a missing view
+# for a controller that plainly had one.
+
+# Generated on first boot: this host's own encrypted credentials and the key
+# that opens them. The key is the reason -- see config/application.rb.
+/tmp/
+/log/
+
+# This host bundles into its own vendor/bundle, like each gem does. The root
+# .gitignore names `/vendor/` and `gems/*/vendor/`; neither reaches here.
+/vendor/
+/.bundle/
+
+# Resolved against ../gems, so it is a description of one machine's checkout
+# rather than of a release. `rake` never runs here and nothing depends on it.
+/Gemfile.lock

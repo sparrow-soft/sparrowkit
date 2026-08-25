@@ -1,0 +1,25 @@
+# RuboCop, configured to agree with Standard exactly.
+#
+# `standardrb` IS RuboCop with a curated rule set, and it is what the gate and
+# CI run. This file exists so that a contributor who types `rubocop` -- which is
+# what most Ruby developers will try first -- gets the same answer rather than
+# several thousand offences from RuboCop's stock defaults.
+#
+# It inherits Standard's rules rather than restating them. Do not add cops here:
+# a second, diverging rule set is how a project ends up with two linters that
+# disagree, and the one nobody runs is the one that is right.
+inherit_gem:
+  standard: config/base.yml
+
+AllCops:
+  # 3.1, matching .standard.yml, and for the reason given there: the four
+  # gemspecs promise >= 3.1, so the linter has to target the oldest Ruby the
+  # gems admit to. Without this, RuboCop falls back to a 2.7 parser and reports
+  # modern syntax as a syntax error.
+  TargetRubyVersion: 3.1
+  NewCops: disable
+  SuggestExtensions: false
+  Exclude:
+    - "**/vendor/**/*"
+    - "**/tmp/**/*"
+    - "**/node_modules/**/*"

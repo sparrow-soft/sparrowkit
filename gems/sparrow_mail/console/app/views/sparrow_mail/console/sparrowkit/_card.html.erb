@@ -1,0 +1,239 @@
+<%#
+  One provider: which one, what it needs, and -- on the first card -- which
+  kinds of mail it handles.
+
+  Rendered twice, so it is a partial rather than the same eighty lines written
+  out twice and edited once. Everything it knows comes from the controller:
+  the list from SparrowMail.registry, the fields from each adapter's
+  required_settings, the identity from its identity_settings. NOTHING HERE
+  NAMES A PROVIDER, and nothing here should.
+
+  Locals: card (:primary or :secondary), title, intro.
+%>
+<section id="mail_card_<%= card %>"
+         data-card="<%= card %>"
+         class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+  <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100"><%= title %></h2>
+  <p class="mt-1 text-sm text-slate-600 dark:text-slate-300"><%= intro %></p>
+
+  <% if @unregistered[card] %>
+    <p role="alert"
+       class="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+      Your credentials name
+      <code class="font-mono"><%= @unregistered[card] %></code>,
+      which is not a registered adapter. Mail will not send until you choose one below.
+    </p>
+  <% end %>
+
+  <div class="mt-4">
+    <%#
+      A visible label, not a placeholder option pressed into service as one.
+      The first option is a placeholder as well, but only so that "nothing
+      chosen yet" is a state the control can be in.
+    %>
+    <label for="mail_<%= card %>_adapter" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+      Provider
+    </label>
+    <select id="mail_<%= card %>_adapter"
+            name="<%= card %>[adapter]"
+            data-provider
+            aria-describedby="mail_<%= card %>_adapter_hint"
+            <%= "disabled" unless @writable %>
+            class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+      <option value="">Choose a provider</option>
+      <% @choices.each do |choice| %>
+        <%#
+          data-identity and data-reputation carry the adapter's own answers to
+          "what tells one sender from another" and "is there a reputation to
+          lose", so the script below can fill the separation warning in without
+          a provider name or a rule of its own.
+        %>
+        <%#
+          An adapter whose gem is missing is SELECTABLE, not disabled.
+
+          Disabled, it sat greyed out saying "needs one more gem" with no way
+          to find out which gem -- the answer was in a list at the foot of the
+          page, and that list is gone because it was shown to everybody
+          regardless of what they had chosen. Choosing it is now how you ask
+          the question, and the answer appears where the settings would be.
+
+          Saving it is still refused, by the controller, with the same reason.
+          So the worst case is a 422 that says what to install, and the ordinary
+          case is reading it before you press anything.
+        %>
+        <option value="<%= choice.name %>"
+                data-display="<%= choice.display_name %>"
+                data-identity="<%= choice.identity_labels.to_sentence %>"
+                data-reputation="<%= choice.reputation_bearing? %>"
+                <%= "selected" if @selected[card] == choice.name.to_s %>><%= choice.display_name %><%= " — needs one more gem" unless choice.available? %></option>
+      <% end %>
+    </select>
+    <p id="mail_<%= card %>_adapter_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Every adapter registered with SparrowMail. Only the settings belonging to the
+      one you choose are saved.
+    </p>
+  </div>
+
+  <%#
+    Before the credentials, not after them.
+
+    Answering it can change what this card asks for: choosing one kind of mail
+    brings a second provider onto the page, and that provider wants its own
+    settings. Asking for secrets first means typing them, then being asked a
+    question that adds more boxes underneath.
+
+    The order is the order of the decisions: which provider, what it is for,
+    then what it needs.
+  %>
+  <% if card == :primary %>
+    <fieldset class="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
+      <legend class="text-sm font-medium text-slate-900 dark:text-slate-100">This provider handles:</legend>
+      <p id="mail_handles_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+        Transactional mail is what somebody's action asked for — sign-in codes, receipts,
+        password resets. Marketing mail is sent in bulk to a list.
+      </p>
+
+      <div class="mt-3 space-y-3">
+        <% [
+             ["both", "Transactional & marketing", nil,
+              "One provider for everything. Nothing is declared as a separate stream."],
+             ["transactional", "Only transactional", "Marketing mail",
+              "Marketing mail goes through a second provider, configured below."],
+             ["marketing", "Only marketing", "Transactional mail",
+              "Transactional mail goes through a second provider, configured below."]
+           ].each do |value, label, other, note| %>
+          <div class="flex items-start gap-3">
+            <input type="radio"
+                   id="mail_handles_<%= value %>"
+                   name="handles"
+                   value="<%= value %>"
+                   data-other="<%= other %>"
+                   aria-describedby="mail_handles_<%= value %>_note"
+                   <%= "checked" if @handles == value %>
+                   <%= "disabled" unless @writable %>
+                   class="mt-1 h-4 w-4 border-slate-500 text-purple-900">
+            <div class="min-w-0 flex-1">
+              <label for="mail_handles_<%= value %>" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                <%= label %>
+              </label>
+              <p id="mail_handles_<%= value %>_note" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                <%= note %>
+              </p>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </fieldset>
+  <% end %>
+
+  <%#
+    What to do about a provider whose gem is not installed, shown only once
+    that provider is the one chosen.
+
+    It used to be a list of every unavailable adapter at the foot of the page,
+    permanently. A developer who had picked Postmark and was never going to use
+    Amazon SES read instructions for installing the AWS SDK on every visit --
+    an unasked question, answered anyway, next to the fields they actually came
+    for.
+
+    Carries `data-settings-for` like the field groups above, so the script that
+    already reveals the chosen provider's settings reveals this too, with no
+    second mechanism and no adapter named anywhere in the JavaScript. With
+    scripting off it stays visible along with everything else, which is the
+    same trade the fields make.
+  %>
+  <% @choices.reject(&:available?).each do |choice| %>
+    <div data-settings-for="<%= choice.name %>"
+         class="mt-5 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+      <p class="text-sm font-medium text-amber-900 dark:text-amber-200">
+        <%= choice.display_name %> needs one more gem
+      </p>
+      <p class="mt-1 text-sm text-amber-900 dark:text-amber-200"><%= choice.unavailable_reason %></p>
+      <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
+        Then run
+        <code class="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs dark:bg-amber-900">bundle install</code>
+        and restart this server &mdash; a gem installed while it is running cannot be
+        loaded into it. Its settings appear here once it is.
+      </p>
+    </div>
+  <% end %>
+
+  <%#
+    Every available provider's fields, rendered visible. The script hides all
+    but the chosen one; with scripting off they all stay on the page and the
+    form still saves correctly, because the controller reads only the fields
+    belonging to the provider this card names.
+  %>
+  <% @choices.select(&:available?).each do |choice| %>
+    <fieldset data-settings-for="<%= choice.name %>" class="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
+      <%#
+        A rule rather than a heading. The dropdown directly above already says
+        which provider these belong to, so naming it again was repeating the
+        answer to a question nobody had asked twice.
+
+        The legend stays, hidden. A fieldset with no legend has no accessible
+        name, and a screen reader would announce a bare group of inputs with
+        nothing to say which provider they configure -- exactly the context the
+        sighted reader gets from the dropdown.
+      %>
+      <legend class="sr-only"><%= choice.display_name %> settings</legend>
+
+      <% if !choice.settings? %>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">No settings of its own.</p>
+      <% else %>
+        <div class="mt-3 space-y-3">
+          <% choice.fields.each do |field| %>
+            <% typed = @typed[card][choice.name.to_s][field.name] %>
+            <% stored = (@selected[card] == choice.name.to_s) ? @stored_for[card][field.name] : nil %>
+            <% field_id = "mail_#{card}_#{choice.name}_#{field.name}" %>
+            <div>
+              <label for="<%= field_id %>" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                <%= field.label %>
+                <% if field.secret? && stored.is_a?(Hash) && stored[:set] %>
+                  <%= render "sparrow_ui/console/secret_set" %>
+                <% end %>
+              </label>
+              <%#
+                A secret goes through sparrow_ui's field, which is a text box
+                masked by CSS rather than a `type="password"`. That is what
+                stops the browser offering to save an API key to the developer's
+                password manager -- see the partial for why `autocomplete="off"`
+                cannot do it. A non-secret is an ordinary box and stays here.
+              %>
+              <% if field.secret? %>
+                <%= render "sparrow_ui/console/secret_field",
+                      id: field_id,
+                      name: "#{card}[settings][#{choice.name}][#{field.name}]",
+                      value: typed,
+                      hint: (stored[:hint] if stored.is_a?(Hash) && stored[:set]),
+                      describedby: "#{field_id}_hint",
+                      disabled: !@writable %>
+              <% else %>
+              <input type="text"
+                     id="<%= field_id %>"
+                     name="<%= card %>[settings][<%= choice.name %>][<%= field.name %>]"
+                     value="<%= typed || stored %>"
+                     autocomplete="off"
+                     aria-describedby="<%= field_id %>_hint"
+                     <%= "disabled" unless @writable %>
+                     class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+              <% end %>
+              <p id="<%= field_id %>_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                <% if !field.secret? %>
+                  Stored in plain text alongside the rest of your credentials.
+                <% elsif stored.is_a?(Hash) && stored[:set] %>
+                  Already set. Leave this blank to keep it; type a new one to replace it.
+                <% else %>
+                  Written once and never shown again. Change it later with
+                  <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">bin/rails credentials:edit</code>
+                  or by typing a new one here.
+                <% end %>
+              </p>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    </fieldset>
+  <% end %>
+
+</section>

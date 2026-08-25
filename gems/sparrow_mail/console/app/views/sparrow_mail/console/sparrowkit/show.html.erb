@@ -1,0 +1,406 @@
+<%#
+  Two cards, because sparrow_mail can send the two kinds of mail through two
+  providers and refuses to pretend otherwise.
+
+  The page renders EVERYTHING: both cards, every available provider's fields
+  in each, the lot visible. The script at the bottom decides what is worth
+  looking at right now. With scripting off nothing is hidden, nothing is
+  unreachable, and a save is still correct -- the controller reads only the
+  fields belonging to the provider each card names, and reads the second card
+  only when the first provider handles one kind of mail.
+
+  Nothing here names a provider. The list comes from SparrowMail.registry, the
+  fields from each adapter's required_settings and the sending identity from
+  its identity_settings -- see lib/sparrow_mail/console/adapters.rb.
+%>
+<h1 class="text-2xl font-semibold text-slate-900 dark:text-slate-100">Mail</h1>
+<p class="mt-1 text-base text-slate-600 dark:text-slate-300">
+  SparrowKit separates <span class="font-medium text-slate-900 dark:text-slate-100">transactional</span>
+  mail &mdash; sign-in codes, receipts, the messages somebody is waiting for &mdash; from
+  <span class="font-medium text-slate-900 dark:text-slate-100">marketing</span> mail. They can go
+  through one provider or two. Sending them from one identity means a spam complaint about a
+  newsletter counts against the reputation carrying your sign-in codes, which is the thing this
+  split exists to prevent.
+</p>
+<p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+  Everything on this page is written to
+  <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs dark:bg-slate-800">sparrow_mail:</code>
+  in your application's Rails encrypted credentials.
+</p>
+
+<% unless @writable %>
+  <div role="alert"
+       class="mt-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+    <p class="font-medium">This page cannot save anything yet</p>
+    <p class="mt-1"><%= @not_writable_reason %></p>
+  </div>
+<% end %>
+
+<form id="mail_form" action="<%= sparrowkit_path %>" method="post" autocomplete="off" class="mt-8">
+  <%#
+    Written out rather than built by form_with. Tailwind only compiles classes
+    it can find in a file, and a class inside an ERB tag is invisible both to
+    the build's scanner and to the spec that checks the build is not stale.
+  %>
+  <input type="hidden" name="_method" value="patch" autocomplete="off">
+  <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+
+  <%#
+    Two boxes, one stored value. The name and the address are separate things
+    to type and separate things to get wrong, but SparrowMail::Configuration
+    takes a single RFC 5322 mailbox -- so the controller joins them on the way
+    in and splits them on the way out, and `default_from` stays the one source
+    of truth.
+  %>
+  <fieldset>
+    <legend class="text-sm font-medium text-slate-900 dark:text-slate-100">Default sender</legend>
+    <p id="mail_sender_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Used only when a mailer does not name a sender of its own. It reaches every
+      provider on this page: it describes the message, not an account.
+    </p>
+
+    <div class="mt-3 grid gap-4 sm:grid-cols-2">
+      <%#
+        Shown rather than asked for, the same way the Authentication panel shows
+        the passkey domain. A product has one name; a second box here is a
+        second answer, and the day they disagree the From line says one thing
+        and the passkey prompt another with both pages looking right.
+      %>
+      <div>
+        <p class="block text-sm font-medium text-slate-900 dark:text-slate-100">Sender name</p>
+
+        <div class="mt-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+          <p class="text-sm text-slate-900 dark:text-slate-100">
+            <%= @inherited_sender_name.presence || "not set yet" %>
+          </p>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+            <% if @inherited_sender_name.present? %>
+              Taken from the name on the
+              <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>.
+              Change it there and this follows.
+            <% else %>
+              Set the name on the
+              <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>
+              and mail goes out from it. Until then it goes out from the address alone.
+            <% end %>
+          </p>
+        </div>
+
+        <div class="mt-3 flex items-start gap-2">
+          <input type="hidden" name="sender_name_override" value="0" autocomplete="off">
+          <input type="checkbox"
+                 id="mail_sender_name_override"
+                 name="sender_name_override"
+                 value="1"
+                 <%= "checked" if @overriding_sender_name %>
+                 <%= "disabled" unless @writable %>
+                 class="mt-0.5 size-4 rounded border-slate-500 text-purple-900 focus:ring-purple-900 dark:text-purple-300 dark:focus:ring-purple-300">
+          <label for="mail_sender_name_override" class="text-sm text-slate-700 dark:text-slate-200">
+            Send from a different name
+            <span class="block text-slate-600 dark:text-slate-300">
+              Only if mail should not come from the product's name — “Acme Support”, say.
+            </span>
+          </label>
+        </div>
+
+        <div id="mail_sender_name_override_field" <%= "hidden" unless @overriding_sender_name %> class="mt-2">
+          <label for="mail_sender_name" class="block text-sm font-medium text-slate-900 dark:text-slate-100">The name mail comes from<%= render "sparrow_ui/console/secret_set" if @stored_sender_name.present? %></label>
+          <input type="text"
+                 id="mail_sender_name"
+                 name="sender_name"
+                 value="<%= @sender_name %>"
+                 placeholder="Acme Support"
+                 autocomplete="off"
+                 <%= "disabled" unless @writable %>
+                 class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+        </div>
+      </div>
+
+      <div>
+        <label for="mail_sender_email" class="block text-sm font-medium text-slate-900 dark:text-slate-100">Sender email address<%= render "sparrow_ui/console/secret_set" if @stored_sender_email.present? %></label>
+        <input type="email"
+               id="mail_sender_email"
+               name="sender_email"
+               value="<%= @sender_email %>"
+               placeholder="hello@acme.test"
+               autocomplete="off"
+               aria-describedby="mail_sender_email_hint"
+               <%= "disabled" unless @writable %>
+               class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+        <p id="mail_sender_email_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          A name without an address is not a sender, so this is what actually gets stored.
+        </p>
+      </div>
+    </div>
+  </fieldset>
+
+  <%= render "card",
+        card: :primary,
+        title: "Your mail provider",
+        intro: "The provider your application sends through, and what it needs to do it." %>
+
+  <%= render "card",
+        card: :secondary,
+        title: "The other kind of mail",
+        intro: "Only when the provider above handles one kind. This one gets its own credentials: " \
+               "sparrow_mail never lends one provider's key to another." %>
+
+  <%#
+    Shown when both kinds would go through one provider that has a reputation
+    to lose. The wording is SparrowMail's own, from the error it raises when it
+    refuses to build the stream -- see verify_separation! in lib/sparrow_mail.rb.
+    Meeting it here beats meeting it at boot.
+  %>
+  <div id="mail_separation"
+       role="status"
+       <%= "hidden" if @separation.nil? %>
+       class="mt-8 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+    <p class="font-medium">
+      Both kinds of mail go through
+      <span data-separation-provider class="font-medium"><%= @separation&.display_name %></span>
+    </p>
+    <p class="mt-1">
+      It tells one sender from another by
+      <span data-separation-identity class="font-medium"><%= @separation&.identity_labels&.to_sentence %></span>.
+      Unless the two cards carry different values there — a different account, API key or
+      sending domain — the provider cannot tell them apart and keeps one reputation for both.
+      Bulk complaints would then decide whether transactional mail is delivered.
+    </p>
+    <p class="mt-1">
+      SparrowMail refuses the send rather than give you the label without the separation.
+      Give the marketing side its own identity, or send it through a different provider.
+    </p>
+  </div>
+
+  <%#
+    The list of adapters needing a gem used to stand here, permanently, naming
+    every one of them. It now lives inside each card against the provider it
+    concerns -- see _card.html.erb -- so it is shown to the developer who chose
+    that provider and to nobody else.
+  %>
+
+  <div class="mt-8 flex items-center gap-4">
+    <button type="submit"
+            <%= "disabled" unless @writable %>
+            class="rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300 disabled:text-slate-600 dark:bg-purple-300 dark:text-purple-950 dark:disabled:bg-slate-700 dark:disabled:text-slate-400">
+      Save mail settings
+    </button>
+    <a href="<%= sparrow_ui.root_path %>"
+       class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100">
+      Back to SparrowKit
+    </a>
+  </div>
+</form>
+
+<%#
+  Its own form, after the settings form and outside it, because it performs a
+  send rather than storing a setting -- and because agents building on
+  SparrowKit need a sanctioned way to answer "does mail actually work?"
+  without scaffolding probe pages of their own.
+
+  A real send through the configured provider, on the transactional stream,
+  which is why the recipient is typed rather than guessed: nothing here
+  should mail anybody the developer did not just name.
+%>
+<section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+  <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Send a test email</h2>
+  <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+    One real message through the provider configured above, the same way the
+    application sends. The quickest answer to "are these credentials right?".
+  </p>
+
+  <form action="<%= test_send_path %>" method="post" autocomplete="off" class="mt-4">
+    <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+
+    <label for="sparrow_mail_test_recipient" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
+      Send it to
+    </label>
+    <input type="email"
+           id="sparrow_mail_test_recipient"
+           name="recipient"
+           placeholder="you@example.com"
+           autocomplete="off"
+           spellcheck="false"
+           class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 font-mono text-sm text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      Your own address, usually. It rides the transactional stream.
+    </p>
+
+    <button type="submit"
+            class="mt-3 rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-800 dark:bg-purple-300 dark:text-purple-950 dark:hover:bg-purple-200">
+      Send test email
+    </button>
+  </form>
+</section>
+
+<%#
+  The mailbox, which exists only while nothing has been configured.
+
+  It is not a feature of the product; it is what stops a fresh application
+  losing every message it sends. sparrow_auth swallows delivery failures on the
+  sign-in path deliberately -- so that a provider having a bad day cannot become
+  a way to learn which addresses have accounts -- and with no adapter at all
+  that swallowed the whole of first run. Somebody typed their address, read
+  "check your email", and waited for a message nothing had sent.
+
+  So this is the other half of the preview adapter: the mail lands in a folder,
+  and here it is. It disappears the moment a real provider is saved, because
+  then the provider's own dashboard is the truthful place to look.
+%>
+<% if @mailbox.any? || SparrowMail.configuration.adapter&.to_sym == SparrowMail::Console::Report::FALLBACK_ADAPTER %>
+  <section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <div class="flex flex-wrap items-baseline justify-between gap-3">
+      <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Mail this application sent</h2>
+
+      <% if @mailbox.any? %>
+        <form action="<%= mailbox_path %>" method="post">
+          <input type="hidden" name="_method" value="delete">
+          <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+          <button type="submit"
+                  class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-purple-900 hover:text-purple-900 dark:border-slate-700 dark:text-slate-200 dark:hover:border-purple-300 dark:hover:text-purple-300">
+            Empty it
+          </button>
+        </form>
+      <% end %>
+    </div>
+
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      No provider is configured, so nothing is being delivered to anybody. Every
+      message is written to <code class="font-mono"><%= SparrowMail::Adapters::Preview::DIRECTORY %></code>
+      instead, and the most recent are here. Sign-in codes included &mdash; that
+      is what this is for.
+    </p>
+
+    <% if @mailbox.empty? %>
+      <p class="mt-4 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        Nothing yet. Anything your application sends from now on shows up here.
+      </p>
+    <% else %>
+      <ol class="mt-4 space-y-3">
+        <% @mailbox.each do |message| %>
+          <li class="rounded-md border border-slate-200 dark:border-slate-800">
+            <details class="group">
+              <summary class="cursor-pointer px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+                <span class="font-medium"><%= message.subject.presence || "(no subject)" %></span>
+                <span class="text-slate-600 dark:text-slate-300">
+                  &mdash; to <%= message.to.presence || "nobody" %>,
+                  <%= time_ago_in_words(message.at) %> ago
+                </span>
+              </summary>
+              <pre class="overflow-x-auto border-t border-slate-200 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-slate-800 dark:border-slate-800 dark:text-slate-200"><%= message.text %></pre>
+            </details>
+          </li>
+        <% end %>
+      </ol>
+    <% end %>
+  </section>
+<% end %>
+
+<script>
+  // Progressive enhancement and nothing else.
+  //
+  // Every card, every provider's fields and the separation warning are already
+  // in the document, rendered by the server in the state they should be in.
+  // This decides which of them are worth looking at right now. Turn scripting
+  // off and the page still renders complete, still reaches every control, and
+  // still saves correctly.
+  //
+  // Vanilla, inline, no build step. This console is served only to this
+  // machine, only in development, and a developer console that needed a
+  // toolchain to render a dropdown would be the wrong trade.
+  //
+  // It knows nothing about any provider. Whether two streams would share a
+  // reputation, and what the provider tells senders apart by, are read off the
+  // <option> the adapter itself supplied.
+  // The sender-name override's disclosure. Its state is already server-rendered
+  // — a refused save comes back showing whatever was typed — so this only keeps
+  // up while somebody clicks.
+  (function () {
+    var toggle = document.getElementById("mail_sender_name_override");
+    var field = document.getElementById("mail_sender_name_override_field");
+    if (!toggle || !field) return;
+
+    var refresh = function () { field.hidden = !toggle.checked; };
+    toggle.addEventListener("change", refresh);
+    refresh();
+  })();
+
+  (function () {
+    var form = document.getElementById("mail_form");
+    if (!form) return;
+
+    var secondCard = document.getElementById("mail_card_secondary");
+    var warning = document.getElementById("mail_separation");
+    if (!secondCard || !warning) return;
+
+    // The heading the server rendered, kept so that turning the split off puts
+    // it back rather than leaving last time's answer behind it.
+    var secondHeading = secondCard.querySelector("h2");
+    var neutralHeading = secondHeading.textContent;
+
+    function provider(card) {
+      return card.querySelector("select[data-provider]");
+    }
+
+    // Only the chosen provider's fields. The rest stay in the document and
+    // still submit; the controller ignores them, which is what makes the
+    // scripting-off page correct too.
+    function revealSettings(card) {
+      var chosen = provider(card).value;
+      var groups = card.querySelectorAll("[data-settings-for]");
+      for (var i = 0; i < groups.length; i++) {
+        groups[i].hidden = groups[i].getAttribute("data-settings-for") !== chosen;
+      }
+    }
+
+    function checkedHandles() {
+      return form.querySelector('input[name="handles"]:checked');
+    }
+
+    function selectedOption(card) {
+      var select = provider(card);
+      return select.options[select.selectedIndex] || null;
+    }
+
+    function fill(attribute, text) {
+      var slots = warning.querySelectorAll("[" + attribute + "]");
+      for (var i = 0; i < slots.length; i++) slots[i].textContent = text;
+    }
+
+    function refresh() {
+      var cards = form.querySelectorAll("[data-card]");
+      for (var i = 0; i < cards.length; i++) revealSettings(cards[i]);
+
+      var handles = checkedHandles();
+      var other = handles ? handles.getAttribute("data-other") : "";
+      var split = !!other;
+
+      secondCard.hidden = !split;
+      secondHeading.textContent = split ? other : neutralHeading;
+
+      var first = provider(document.getElementById("mail_card_primary")).value;
+      var second = provider(secondCard).value;
+      var option = selectedOption(document.getElementById("mail_card_primary"));
+      var shared =
+        split &&
+        first !== "" &&
+        first === second &&
+        option !== null &&
+        option.getAttribute("data-reputation") === "true";
+
+      warning.hidden = !shared;
+      if (shared) {
+        // The brand, off the option, not the select's value. The value is the
+        // registry key -- `ses`, not `Amazon SES` -- and this sentence is
+        // being read by a person.
+        fill("data-separation-provider", option.getAttribute("data-display"));
+        fill("data-separation-identity", option.getAttribute("data-identity"));
+      }
+    }
+
+    // One delegated listener covers both dropdowns and all three radios, and
+    // keeps working if a card is ever re-rendered.
+    form.addEventListener("change", refresh);
+    refresh();
+  })();
+</script>

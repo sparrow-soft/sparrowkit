@@ -1,0 +1,57 @@
+# Dependency updates.
+#
+# The reason this exists: SparrowKit's 0.1.1 line was broken for days by
+# Solid Queue shipping a minor release that added two models. Nothing was wrong
+# with the release; the breakage was ours, and CI only found it once a human
+# pushed. A bot that opens the bump as a pull request finds that class of
+# problem on the day it lands rather than the day somebody happens to build.
+version: 2
+updates:
+  # One entry per Gemfile. Dependabot does not discover them recursively, so a
+  # new gem directory needs a new entry here or its dependencies go unwatched.
+  - package-ecosystem: bundler
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: bundler
+    directory: "/gems/sparrow_mail"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: "/gems/sparrow_auth"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: "/gems/sparrow_pay"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: "/gems/sparrow_ui"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: "/preview"
+    schedule:
+      interval: weekly
+
+  # Tailwind and its toolchain, used to build the console stylesheet.
+  - package-ecosystem: npm
+    directory: "/gems/sparrow_ui"
+    schedule:
+      interval: weekly
+
+  # The actions in the workflows below. A pinned action that is never bumped is
+  # a supply-chain dependency nobody is watching.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+# The standard Rails Rakefile, and like bin/rails it is load-bearing.
+#
+# Without it, `bin/rails db:prepare` walks up and finds the REPOSITORY's
+# Rakefile -- which builds gems and runs four test suites and has never heard
+# of db:prepare. The failure says `Unrecognized command "db:prepare"` and
+# prints the repository root in parentheses, which is the only hint that it
+# went looking somewhere else entirely.
+
+require_relative "config/application"
+
+Rails.application.load_tasks

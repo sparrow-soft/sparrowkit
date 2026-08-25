@@ -1,0 +1,59 @@
+<h1>sparrow_auth</h1>
+
+<p>A bare Rails application with the engine mounted at <code>/auth</code>. Nothing
+here is the engine's own; it is the host side, which is why the mailbox lives
+here and not in the gem.</p>
+
+<% if @offer_passkey %>
+  <div class="offer">
+    <strong>Add a passkey?</strong>
+    <p>You are signed in as <%= @current_account.email %> and have no passkey yet.
+    A passkey signs you in with this device — Touch ID, Windows Hello, your phone —
+    and there is nothing to type and nothing to intercept.</p>
+    <p>
+      <a href="/auth/webauthn-setup">Add a passkey</a> ·
+      <%= button_to "Not now", decline_passkey_path %>
+    </p>
+  </div>
+<% elsif @current_account&.passkey? %>
+  <p class="offer-done">Signed in as <%= @current_account.email %>, with
+  <%= pluralize(@current_account.webauthn_credentials.count, "passkey") %>.
+  <a href="/auth/passkeys">Manage them</a>.</p>
+<% end %>
+
+<h2>Try it</h2>
+<ol>
+  <li><a href="/auth/create-account">Create an account</a>, then open the
+      <%= link_to "mailbox", mailbox_path %> and follow the confirmation link.
+      It will not confirm until you press the button on the page it opens.</li>
+  <li><a href="/auth/otp">Sign in with a code</a>. The code arrives in the
+      <%= link_to "mailbox", mailbox_path %>. Note that the same screen appears
+      whether or not the address has an account.</li>
+  <li>Try an address that does not exist, and one that never confirmed. The page
+      says the same thing every time; the mailbox says what actually happened.</li>
+  <li><a href="/auth/logout">Sign out</a> and check the session row disappears.</li>
+</ol>
+
+<h2>Accounts</h2>
+<% if @accounts.any? %>
+  <table>
+    <tr><th>Address</th><th>Status</th><th>Sessions</th><th>Passkeys</th></tr>
+    <% @accounts.each do |account| %>
+      <tr>
+        <td><%= account.email %></td>
+        <td><%= account.verified? ? "confirmed" : "not confirmed" %></td>
+        <td><%= ActiveRecord::Base.connection.select_value(
+                  ActiveRecord::Base.sanitize_sql_array([
+                    "SELECT COUNT(*) FROM sparrow_auth_account_active_session_keys WHERE account_id = ?",
+                    account.id])) %></td>
+        <td><%= account.webauthn_credentials.count %></td>
+      </tr>
+    <% end %>
+  </table>
+<% else %>
+  <p>No accounts yet.</p>
+<% end %>
+
+<h2>Getting in your way</h2>
+<p>One send per address per minute is correct in production and tedious by hand.</p>
+<%= button_to "Clear rate limit counters", clear_rate_limits_path %>

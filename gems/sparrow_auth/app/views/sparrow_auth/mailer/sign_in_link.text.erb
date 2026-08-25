@@ -1,0 +1,11 @@
+Sign in here:
+
+<%= @url %>
+
+It expires in <%= (SparrowAuth.config.emailed_sign_in_link_expiry / 60).to_i %> minutes and
+only works in the browser that asked for it. If you opened this message
+somewhere else — a phone, another computer — go back to the browser you started
+in and ask for a new one.
+
+If you did not ask to sign in, you can ignore this message. Nobody can use this
+link without also having your browser open.

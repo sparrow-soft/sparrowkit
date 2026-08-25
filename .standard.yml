@@ -1,0 +1,15 @@
+# Match the four gemspecs, which all declare `>= 3.1`. Set to 3.2 this diverged
+# from what the gems claim to support, and standard then advised dropping
+# `keyword_init: true` from a Struct -- correct on 3.2, silently wrong on 3.1,
+# where a keywordless Struct binds the whole keyword hash to its first member.
+# The linter has to target the oldest Ruby the gems admit to, not the newest one
+# CI happens to run.
+ruby_version: 3.1
+
+ignore:
+  # Bundler installs into gems/*/vendor/bundle here. A pattern anchored at the
+  # repository root would not match those, and standardrb would spend its time
+  # linting other people's gemspecs.
+  - "**/vendor/**/*"
+  - "**/tmp/**/*"
+  - "template/**/*"

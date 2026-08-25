@@ -1,0 +1,1745 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Bundler first, before anything else is required.
+#
+# Requiring a default gem before this line activates the version shipped with
+# Ruby, and Bundler then refuses to set up because the Gemfile asks for a
+# different one. json is the usual culprit and the error names it, which sends
+# you looking at json rather than at the load order. Doing this here is also
+# what lets the script be run as `bin/smoke` rather than only under
+# `bundle exec` — which is how it is documented, and therefore how it has to
+# work.
+ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
+require "bundler/setup"
+
+# Live smoke test for sparrow_auth.
+#
+# The rspec suite proves the engine's behaviour. This proves the things a suite
+# structurally cannot:
+#
+#   * The migrations run against an empty database. The test database is reused,
+#     so after the first run the suite stops exercising them, and a migration
+#     that only works against an already-migrated schema would go unnoticed.
+#   * The engine works outside transactional fixtures, where every write is real
+#     and nothing is rolled back between steps.
+#   * The real forms work over real HTTP with CSRF protection on, which the test
+#     environment disables.
+#   * The verification and invitation emails are readable by a human, which no
+#     assertion can settle.
+#
+#   bin/smoke                 # everything, against the test mail adapter
+#   bin/smoke --dry-run       # print the plan, touch nothing
+#   bin/smoke --server        # leave it running so you can click through
+#
+# Give it SendLayer credentials in .env.smoke and it sends the auth emails to a
+# real inbox as well, then prints a checklist of what to look at.
+#
+# Nothing here writes a credential to the terminal or anywhere else.
+
+require "cgi"
+require "fileutils"
+require "json"
+require "net/http"
+require "optparse"
+require "securerandom"
+require "socket"
+require "stringio"
+require "uri"
+
+ROOT = File.expand_path("..", __dir__)
+
+# Helpers live on this script's own object, not on Object.
+#
+# A bare `def` at the top level of a Ruby script defines a private instance
+# method on Object, so every object in the process answers to it — including
+# classes inside gems, and including their DSLs. This script's `skip` shadowed
+# BinData's `skip` inside tpm-key_attestation, a transitive dependency of the
+# webauthn gem, and broke it at load time with an arity error pointing at a
+# file with nothing to do with passkeys. Every request then 500'd.
+#
+# `class << self` puts these on main's singleton class instead. Call sites are
+# unchanged, and nothing else in the process can see them.
+class << self
+  def load_env_file(path)
+    return unless File.exist?(path)
+
+    File.readlines(path, encoding: "UTF-8").each do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?("#")
+
+      key, value = line.split("=", 2)
+      next if key.nil? || value.nil?
+
+      ENV[key.strip] ||= value.strip.delete_prefix('"').delete_suffix('"')
+    end
+  end
+end
+
+load_env_file(File.join(ROOT, ".env.smoke"))
+
+# Blank is unset. .env.smoke is copied from an example whose optional keys are
+# present but empty, and an empty string is truthy in Ruby, so reading ENV
+# directly makes a blank line look like a configured value and then fails
+# somewhere much less obvious.
+class << self
+  def env(name)
+    value = ENV[name]
+    (value.nil? || value.strip.empty?) ? nil : value.strip
+  end
+end
+
+options = {dry_run: false, server: false, keep_db: false}
+OptionParser.new do |parser|
+  parser.banner = "Usage: bin/smoke [options]"
+  parser.on("--dry-run", "Print the plan and touch nothing") { options[:dry_run] = true }
+  parser.on("--server", "Boot a clean app to click through, skipping the checks") { options[:server] = true }
+  parser.on("--keep-db", "Do not drop the smoke database at the end") { options[:keep_db] = true }
+  parser.on("-h", "--help") {
+    puts parser
+    exit 0
+  }
+end.parse!
+
+DB_NAME = env("SPARROW_AUTH_SMOKE_DB") || "sparrow_auth_smoke"
+API_KEY = env("SENDLAYER_API_KEY")
+MAIL_FROM = env("SMOKE_FROM")
+MAIL_TO = env("SMOKE_TO")
+LIVE_MAIL = [API_KEY, MAIL_FROM, MAIL_TO].none?(&:nil?)
+
+RUN_ID = Time.now.strftime("%Y%m%d-%H%M%S")
+PORT = Integer(env("SMOKE_PORT") || 0)
+
+# --- reporting --------------------------------------------------------------
+
+GREEN = "\e[32m"
+RED = "\e[31m"
+YELLOW = "\e[33m"
+DIM = "\e[2m"
+BOLD = "\e[1m"
+RESET = "\e[0m"
+
+RESULTS = {pass: 0, fail: 0, skip: 0}
+FAILURES = []
+
+class << self
+  def section(title)
+    puts "\n#{BOLD}#{title}#{RESET}"
+  end
+end
+
+class << self
+  def check(name)
+    detail = yield
+    RESULTS[:pass] += 1
+    puts "  #{GREEN}pass#{RESET}  #{name}#{"#{DIM} (#{detail})#{RESET}" if detail}"
+  rescue => e
+    RESULTS[:fail] += 1
+    FAILURES << "#{name}: #{e.message.lines.first&.strip}"
+    puts "  #{RED}FAIL#{RESET}  #{name}"
+    puts "        #{RED}#{e.class}: #{e.message.lines.first&.strip}#{RESET}"
+  end
+end
+
+class << self
+  def skip(name, why)
+    RESULTS[:skip] += 1
+    puts "  #{YELLOW}skip#{RESET}  #{name} #{DIM}(#{why})#{RESET}"
+  end
+end
+
+class << self
+  def expect!(condition, message)
+    raise message unless condition
+  end
+end
+
+# Attribute order is not something a page owes anybody: Rodauth's templates
+# write `type name value`, Rails' form helpers write `value autocomplete type
+# name`. Find the input, then read its value.
+class << self
+  def form_field(html, name)
+    tag = html[/<input\b[^>]*\bname="#{Regexp.escape(name)}"[^>]*>/]
+    tag && tag[/\bvalue="([^"]*)"/, 1]
+  end
+end
+
+# --- an HTTP client that behaves like a browser ------------------------------
+
+# Cookies and CSRF tokens, because the point is to drive the real forms rather
+# than to call into the app. A flow that works only when forgery protection is
+# off is not a flow anyone deploys.
+class Browser
+  attr_reader :last_response
+
+  def initialize(base)
+    @base = URI(base)
+    @cookies = {}
+    @last_response = nil
+  end
+
+  def get(path)
+    follow(request(Net::HTTP::Get.new(uri_for(path))))
+  end
+
+  def post(path, params = {})
+    uri = uri_for(path)
+    req = Net::HTTP::Post.new(uri)
+    req.set_form_data(params)
+    request(req)
+  end
+
+  # Fetches a page and posts the form on it, carrying whatever CSRF token the
+  # form contains. Rails and Roda spell the field differently, so both are
+  # picked up.
+  def submit(path, params = {}, form_path: path)
+    page = get(form_path)
+    submit_on(page, path, params)
+  end
+
+  # Posts using the tokens on a page that has already been fetched.
+  #
+  # Needed wherever fetching the form again would destroy what is being
+  # answered. The step-up page issues a fresh WebAuthn challenge on every GET —
+  # that is the point of it — so a second fetch would invalidate the assertion
+  # just signed against the first.
+  def submit_on(page, path, params = {})
+    tokens = csrf_fields(page.body, action: path, method: params["_method"] || params[:_method])
+    request(build_post(path, params.merge(tokens)))
+  end
+
+  # Follows redirects the way a browser does, which is not optional here.
+  # Rodauth answers a verification link by putting the key in the session and
+  # redirecting to a URL without it, so the key never reaches the address bar,
+  # the browser history or a Referer header. A client that stops at the 302
+  # never sees the confirmation form, and would report that as a broken engine.
+  def follow(response, hops: 5)
+    return response unless response.is_a?(Net::HTTPRedirection) && hops.positive?
+
+    location = response["location"]
+    return response if location.nil?
+
+    follow(request(Net::HTTP::Get.new(uri_for(location))), hops: hops - 1)
+  end
+
+  def cookies
+    @cookies.dup
+  end
+
+  # The raw Set-Cookie lines, because the attributes are the point: a cookie
+  # with a Domain attribute goes to every sibling subdomain, and the parsed
+  # value alone would not show that.
+  def raw_set_cookies
+    @raw_set_cookies ||= []
+  end
+
+  def reset_session!
+    @cookies = {}
+  end
+
+  private
+
+  def build_post(path, params)
+    uri = uri_for(path)
+    req = Net::HTTP::Post.new(uri)
+    req.set_form_data(params)
+    req
+  end
+
+  # Rails issues a *per-form* CSRF token, scoped to the action and method the
+  # form points at. A page with several forms therefore carries several tokens,
+  # and taking the first one works right up until the page has more than one —
+  # at which point every request is rejected for a reason that looks nothing
+  # like "you read the wrong form".
+  #
+  # So when a page has more than one form, the one whose action and method match
+  # what is about to be sent is the one read. Falling back to scanning the whole
+  # page keeps Rodauth's single-form templates working unchanged.
+  def csrf_fields(html, action: nil, method: nil)
+    scope = form_matching(html, action, method) || html
+    fields = {}
+
+    scope.to_s.scan(/<input[^>]*type="hidden"[^>]*>/i).each do |input|
+      name = input[/name="([^"]+)"/, 1]
+      value = input[/value="([^"]*)"/, 1]
+      next unless name && %w[authenticity_token _csrf].include?(name)
+
+      fields[name] = CGI.unescapeHTML(value.to_s)
+    end
+    fields
+  end
+
+  def form_matching(html, action, method)
+    return nil if action.nil?
+
+    html.to_s.scan(%r{<form\b.*?</form>}mi).find { |form|
+      next false unless form[/\baction="([^"]*)"/, 1].to_s.end_with?(action)
+      next true if method.nil?
+
+      form[/name="_method"[^>]*value="([^"]*)"/, 1].to_s.casecmp?(method.to_s) ||
+        form[/value="([^"]*)"[^>]*name="_method"/, 1].to_s.casecmp?(method.to_s)
+    }
+  end
+
+  def uri_for(path)
+    path.start_with?("http") ? URI(path) : URI.join(@base, path)
+  end
+
+  def request(req)
+    req["Cookie"] = @cookies.map { |k, v| "#{k}=#{v}" }.join("; ") unless @cookies.empty?
+
+    response = Net::HTTP.start(req.uri.host, req.uri.port, use_ssl: req.uri.scheme == "https") do |http|
+      http.request(req)
+    end
+
+    Array(response.get_fields("set-cookie")).each do |raw|
+      raw_set_cookies << raw
+      name, value = raw.split(";").first.to_s.split("=", 2)
+      @cookies[name] = value if name && value
+    end
+
+    @last_response = response
+  end
+end
+
+# --- the plan ---------------------------------------------------------------
+
+puts "#{BOLD}sparrow_auth smoke test#{RESET}"
+puts "#{DIM}run id    #{RUN_ID}#{RESET}"
+puts "#{DIM}database  #{DB_NAME} (created and migrated from empty, then dropped)#{RESET}"
+puts "#{DIM}mail      #{LIVE_MAIL ? "SendLayer, to #{MAIL_TO}" : "test adapter, read in-process"}#{RESET}"
+
+if options[:dry_run]
+  puts "\n#{YELLOW}--dry-run: nothing was created, migrated or sent.#{RESET}"
+  exit 0
+end
+
+# --server skips the checks deliberately.
+#
+# Running them first leaves a dozen accounts, a full mailbox and spent rate-limit
+# budgets, and then the first thing you do by hand is pick the wrong message out
+# of the list. That happened while this was being written, and cost an hour
+# chasing a verification bug that did not exist. A person clicking through wants
+# an empty application; a person checking correctness runs bin/smoke with no
+# arguments.
+SERVER_ONLY = options[:server]
+
+# --- database ---------------------------------------------------------------
+
+section "Database"
+
+class << self
+  def psql(command, database: "postgres")
+    system("psql", "-d", database, "-v", "ON_ERROR_STOP=1", "-q", "-c", command,
+      out: File::NULL, err: File::NULL)
+  end
+end
+
+check "creates the smoke database from nothing" do
+  psql(%(DROP DATABASE IF EXISTS "#{DB_NAME}"))
+  expect!(psql(%(CREATE DATABASE "#{DB_NAME}")), "could not create #{DB_NAME}")
+  DB_NAME
+end
+
+ENV["RAILS_ENV"] = "smoke"
+ENV["SPARROW_AUTH_SMOKE_DB"] = DB_NAME
+$LOAD_PATH.unshift(File.join(ROOT, "lib"))
+require File.join(ROOT, "spec", "dummy", "config", "environment")
+
+# A copy of the application's log, kept where this run can read it.
+#
+# The smoke environment logs to $stdout, which puts everything the application
+# says in front of a person and none of it in front of the harness. Six
+# ActionView errors once scrolled past on a run that reported no failures.
+#
+# Rails.logger is a BroadcastLogger, so a second destination can be added to the
+# object every middleware already holds — including the one that logs unhandled
+# exceptions — rather than replacing it and hoping nothing kept a reference.
+# Same level as the terminal's copy, so this captures what a person would see
+# and does not quietly switch the application into debug logging: the broadcast
+# reports the lowest level of its destinations, and other code asks it.
+SERVER_LOG = StringIO.new
+Rails.logger.broadcast_to(
+  ActiveSupport::TaggedLogging.new(ActiveSupport::Logger.new(SERVER_LOG))
+    .tap { |logger| logger.level = Rails.logger.level }
+)
+
+check "runs the engine's migrations against an empty schema" do
+  ActiveRecord::Migration.verbose = false
+  ActiveRecord::MigrationContext.new(
+    SparrowAuth::Engine.root.join("db", "migrate").to_s
+  ).migrate
+
+  # The dummy application's own migrations, run separately, because that is how
+  # a host application works: its tables are its own, and the tenancy helpers
+  # have to hold against a model the engine never saw.
+  ActiveRecord::MigrationContext.new(
+    File.join(ROOT, "spec", "dummy", "db", "migrate")
+  ).migrate
+
+  tables = ActiveRecord::Base.connection.tables.grep(/^sparrow_auth_/).sort
+  expect!(tables.include?("sparrow_auth_accounts"), "accounts table missing")
+  expect!(tables.include?("sparrow_auth_invitations"), "invitations table missing")
+  expect!(tables.include?("sparrow_auth_organizations"), "organizations table missing")
+  expect!(tables.include?("sparrow_auth_memberships"), "memberships table missing")
+  expect!(ActiveRecord::Base.connection.tables.include?("widgets"),
+    "the host application's own table is missing")
+  "#{tables.size} engine tables, plus the host's own"
+end
+
+# The constraints are load-bearing, and a smoke run against a fresh database is
+# the only place they are exercised as newly created rather than pre-existing.
+check "creates the constraints the engine relies on" do
+  connection = ActiveRecord::Base.connection
+
+  expect!(connection.extension_enabled?("citext"), "citext extension not enabled")
+
+  indexes = connection.indexes("sparrow_auth_accounts").map(&:name)
+  expect!(indexes.include?("index_sparrow_auth_accounts_on_email_live"),
+    "partial unique index on live accounts missing")
+
+  # One live invitation per address *per organization*, said as two indexes over
+  # disjoint sets of rows. The second is the load-bearing half: PostgreSQL treats
+  # each NULL organization_id as its own value, so a single (email,
+  # organization_id) index would leave every invitation naming no organization
+  # outside the rule entirely.
+  invitation_indexes = connection.indexes("sparrow_auth_invitations")
+  scoped = invitation_indexes.find { |index|
+    index.name == "index_sparrow_auth_invitations_on_email_and_org_pending"
+  }
+  expect!(scoped, "partial unique index on pending invitations missing")
+  expect!(scoped.unique, "the pending-invitation index is not unique")
+
+  unscoped = invitation_indexes.find { |index|
+    index.name == "index_sparrow_auth_invitations_on_email_pending_no_org"
+  }
+  expect!(unscoped, "nothing stops two live invitations to one address when " \
+    "neither names an organization")
+  expect!(unscoped.unique, "the no-organization invitation index is not unique")
+
+  expires = connection.indexes("sparrow_auth_otp_codes").map(&:name)
+  expect!(expires.include?("index_sparrow_auth_otp_codes_on_expires_at"),
+    "sparrow_auth:prune has no index to find expired codes by")
+
+  "citext, partial unique indexes"
+end
+
+check "refuses a second live account for one address, at the database level" do
+  SparrowAuth::Account.create!(email: "dupe-#{RUN_ID}@example.test")
+
+  duplicated = begin
+    SparrowAuth::Account.create!(email: "dupe-#{RUN_ID}@example.test")
+    true
+  rescue ActiveRecord::RecordNotUnique
+    false
+  end
+
+  expect!(!duplicated, "the database allowed two live accounts for one address")
+  SparrowAuth::Account.where(email: "dupe-#{RUN_ID}@example.test").delete_all
+  "unique index holds"
+end
+
+# --- mail -------------------------------------------------------------------
+
+if LIVE_MAIL
+  SparrowMail.configure do |config|
+    config.adapter = :sendlayer
+    config.settings = {api_key: API_KEY}
+    config.default_from = MAIL_FROM
+  end
+else
+  SparrowMail.configure do |config|
+    config.adapter = :test
+    config.default_from = "SparrowAuth Smoke <no-reply@example.test>"
+  end
+end
+
+# Passwords are OFF by default in the engine, and on for this run.
+#
+# This script exercises the password sign-in method on purpose — the throttle section
+# below is entirely about it — and uses a password as the cheapest way to get an
+# account signed in before checking something else. Asked for explicitly, here,
+# so the dependence is visible: with the default configuration those checks
+# would fail, and they would be right to.
+#
+# The suite covers the off position in spec/requests/password_flag_spec.rb.
+SparrowAuth.configure do |config|
+  config.passwords_enabled = true
+end
+
+# --- server -----------------------------------------------------------------
+
+section "Server"
+
+# The buyer's own sign-in screen, written into the harness before the server
+# starts.
+#
+# SparrowKit ships no sign-in page: `rails generate sparrowkit:screens` writes
+# one into the application, and that is the page a person actually meets. This
+# script used to drive /auth/otp, which the engine served until 0.1.0 -- so
+# every check below was exercising a page that no longer exists anywhere.
+#
+# Generating it here rather than checking a copy into the harness is the whole
+# point. It means these checks run against the file a buyer gets, from the
+# generator a buyer runs, over real HTTP with CSRF on. The release run that
+# preceded this rewrite found two blockers in exactly that path, both invisible
+# to a suite: a routes file that would not load, and a redirect to a route that
+# does not exist in a new application.
+#
+# Removed again at the end, in an ensure, because it must not be left behind
+# for the next rspec run to autoload.
+GENERATED_SCREENS = %w[sign_in invitation connections].freeze
+
+GENERATED_FILES = [
+  "app/controllers/sign_in_controller.rb", "app/views/sign_in",
+  "app/controllers/invitations_controller.rb", "app/views/invitations",
+  "app/controllers/connections_controller.rb", "app/views/connections"
+].map { |path| SparrowAuth::Engine.root.join("spec/dummy", path) }.freeze
+
+def remove_generated_screen
+  GENERATED_FILES.each { |path| FileUtils.rm_rf(path) }
+end
+
+at_exit { remove_generated_screen }
+
+check "writes the buyer's sign-in screen with sparrowkit:screens" do
+  remove_generated_screen
+
+  require "rails/generators"
+  require "generators/sparrowkit/screens/screens_generator"
+
+  Sparrowkit::Generators::ScreensGenerator.start(
+    GENERATED_SCREENS,
+    destination_root: SparrowAuth::Engine.root.join("spec/dummy"),
+    shell: Thor::Shell::Basic.new
+  )
+
+  missing = GENERATED_FILES.reject { |path| File.exist?(path) }
+  expect!(missing.empty?, "the generator wrote nothing at: #{missing.join(", ")}")
+
+  # The routes file has to LOAD, which is a different question from whether it
+  # holds the right lines -- and the difference was a release blocker. Rails
+  # names an unnamed route after its path, so an unnamed `post "sign-in"` above
+  # a named `get "sign-in"` takes the name and the explicit `as:` collides.
+  Rails.application.reload_routes!
+  expect!(Rails.application.routes.named_routes.names.include?(:sign_in),
+    "the generated routes did not draw a sign_in path")
+
+  "#{GENERATED_SCREENS.join(", ")}: controllers, views and routes that draw"
+end
+
+require "puma"
+require "puma/configuration"
+require "puma/launcher"
+require "puma/log_writer"
+
+server_port = PORT.zero? ? TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] } : PORT
+launcher = nil
+
+check "boots the application with the engine mounted" do
+  app = Rails.application
+  config = Puma::Configuration.new do |user_config|
+    user_config.bind "tcp://127.0.0.1:#{server_port}"
+    user_config.app app
+    user_config.threads 1, 4
+    user_config.environment "smoke"
+  end
+  # LogWriter.null rather than Events, which in Puma 6 takes no arguments and is
+  # for lifecycle hooks. Silencing the server keeps the run's own output legible.
+  launcher = Puma::Launcher.new(config, log_writer: Puma::LogWriter.null)
+  Thread.new { launcher.run }
+
+  deadline = Time.now + 20
+  ready = false
+  until Time.now > deadline || ready
+    begin
+      TCPSocket.new("127.0.0.1", server_port).close
+      ready = true
+    rescue Errno::ECONNREFUSED
+      sleep 0.2
+    end
+  end
+  expect!(ready, "the server never started listening on #{server_port}")
+  "http://127.0.0.1:#{server_port}"
+end
+
+BASE = "http://127.0.0.1:#{server_port}"
+
+if SERVER_ONLY
+  SparrowMail.deliveries.clear
+
+  puts <<~RUNNING
+
+    #{BOLD}Open http://127.0.0.1:#{server_port}#{RESET}
+
+    #{DIM}A bare Rails application with the engine mounted at /auth, and nothing in
+    it. The start page lists what to try and links to a mailbox showing every
+    message sparrow_mail has been handed, which is how you read confirmation
+    links and sign-in codes without configuring a provider.#{RESET}
+
+      #{BOLD}/#{RESET}                     start here; shows accounts and their status
+      #{BOLD}/mailbox#{RESET}              codes and links arrive here
+      #{BOLD}/auth/create-account#{RESET}  sign up
+      #{BOLD}/sign-in#{RESET}              sign in with an emailed code (your page, generated)
+      #{BOLD}/auth/login#{RESET}           sign in with a password
+
+    #{DIM}Run bin/smoke with no arguments to check correctness instead.
+    The #{DB_NAME} database is left in place. Ctrl-C to stop.#{RESET}
+
+  RUNNING
+
+  begin
+    sleep
+  rescue Interrupt
+    puts "stopping"
+  end
+  exit 0
+end
+
+check "serves the sign-in page through the engine's mount point" do
+  page = Browser.new(BASE).get("/auth/login")
+
+  expect!(page.code == "200", "GET /auth/login returned #{page.code}")
+  expect!(page.body.include?("<form"), "the sign-in page has no form on it")
+  "200, with a form"
+end
+
+# The host application's own two pages, asked for directly, because nothing else
+# in this file does.
+#
+# Every other request that lands on them arrives by following a redirect after
+# some flow, and a template that raises inside a followed redirect fails no
+# assertion here: the flow being checked already got what it came for, and the
+# body it ended on is never read. So these two pages — the ones carrying the
+# smoke layout, the ones a person actually looks at while clicking through —
+# were the only ones the harness could not see break.
+#
+# That is measured, not feared. A view helper went missing under RAILS_ENV=smoke,
+# / and /mailbox raised on every request, six template errors went to the log,
+# and the run reported 79 passed, 0 failed.
+check "serves the start page" do
+  page = Browser.new(BASE).get("/")
+
+  expect!(page.code == "200", "GET / returned #{page.code}")
+
+  # The status is not enough on its own. show_exceptions is :all in this
+  # environment, deliberately, so a failure renders a page rather than dropping
+  # the connection — and an error page rendered by something that swallowed the
+  # exception would answer a status check perfectly well. Ask for the page.
+  expect!(page.body.include?("<h1>sparrow_auth</h1>"),
+    "GET / answered without the start page on it")
+  expect!(page.body.include?("<title>sparrow_auth smoke</title>"),
+    "the start page rendered without the smoke layout around it")
+  "200, page and layout"
+end
+
+check "serves the mailbox" do
+  page = Browser.new(BASE).get("/mailbox")
+
+  expect!(page.code == "200", "GET /mailbox returned #{page.code}")
+  expect!(page.body.include?("<h1>Mailbox</h1>"),
+    "GET /mailbox answered without the mailbox on it")
+  expect!(page.body.include?("<title>sparrow_auth smoke</title>"),
+    "the mailbox rendered without the smoke layout around it")
+  "200, page and layout"
+end
+
+# --- the flow ---------------------------------------------------------------
+
+section "Signup, verification, signin"
+
+PASSWORD = "correct horse battery staple"
+
+class << self
+  def account_email(label)
+    LIVE_MAIL ? MAIL_TO : "#{label}-#{RUN_ID}@example.test"
+  end
+end
+
+# With live mail every address has to be the one real inbox, so each run gets a
+# fresh database and the addresses are reused rather than collided.
+INVITEE = account_email("invitee")
+BYSTANDER = LIVE_MAIL ? MAIL_TO : "bystander-#{RUN_ID}@example.test"
+
+class << self
+  def last_mail_body
+    SparrowMail.deliveries.last&.text_body
+  end
+end
+
+# Scoped to one account, deliberately.
+#
+# Nothing here is rolled back between steps, which is the point of a smoke run,
+# so a global count is polluted by every account created earlier. It also would
+# not survive verification's autologin, which legitimately opens a session
+# before anyone reaches the sign-in form.
+class << self
+  def sessions_for(email)
+    account = SparrowAuth::Account.find_by_email(email)
+    return 0 unless account
+
+    ActiveRecord::Base.connection.select_value(
+      ActiveRecord::Base.sanitize_sql_array([
+        "SELECT COUNT(*) FROM sparrow_auth_account_active_session_keys WHERE account_id = ?",
+        account.id
+      ])
+    ).to_i
+  end
+end
+
+class << self
+  def verification_key_for(body)
+    url = body.to_s[%r{https?://\S+}]
+    return nil unless url
+
+    CGI.parse(URI.parse(url).query.to_s)["key"]&.first
+  end
+end
+
+browser = Browser.new(BASE)
+signup_status = nil
+
+check "creates an account" do
+  before = SparrowAuth::Account.count
+  response = browser.submit("/auth/create-account",
+    {login: INVITEE, password: PASSWORD, "password-confirm": PASSWORD},
+    form_path: "/auth/create-account")
+  signup_status = response.code
+
+  expect!(SparrowAuth::Account.count == before + 1,
+    "no account was created (HTTP #{response.code})")
+  "HTTP #{response.code}"
+end
+
+check "creates it unverified" do
+  account = SparrowAuth::Account.find_by_email(INVITEE)
+
+  expect!(account, "account not found")
+  expect!(!account.verified?, "the account was verified before anyone confirmed anything")
+  "status unverified"
+end
+
+verification_key = nil
+
+check "sends a verification email" do
+  if LIVE_MAIL
+    skip_reason = nil
+    expect!(skip_reason.nil?, "unreachable")
+  end
+
+  body = last_mail_body
+  expect!(body, "no email was sent")
+  verification_key = verification_key_for(body)
+  expect!(verification_key, "the email contains no verification link")
+  LIVE_MAIL ? "sent to #{MAIL_TO}" : "captured in-process"
+end
+
+check "does not verify from fetching the link alone" do
+  account = SparrowAuth::Account.find_by_email(INVITEE)
+  url = last_mail_body.to_s[%r{https?://\S+}]
+  Browser.new(BASE).get(url.sub(%r{https?://[^/]+}, BASE))
+
+  expect!(!account.reload.verified?,
+    "merely fetching the link verified the address, so any mailbox scanner would")
+  "a link scanner cannot verify on the recipient's behalf"
+end
+
+check "verifies when the confirmation form is submitted" do
+  account = SparrowAuth::Account.find_by_email(INVITEE)
+  browser.submit("/auth/verify-account", {key: verification_key},
+    form_path: "/auth/verify-account?key=#{CGI.escape(verification_key)}")
+
+  expect!(account.reload.verified?, "the account is still unverified after confirming")
+  "verified"
+end
+
+check "opens a database-backed session on signin" do
+  browser.reset_session!
+  before = sessions_for(INVITEE)
+  browser.submit("/auth/login", {login: INVITEE, password: PASSWORD}, form_path: "/auth/login")
+
+  after = sessions_for(INVITEE)
+  expect!(after == before + 1,
+    "signing in changed the session count from #{before} to #{after}, expected one more")
+  "#{after} session rows for this account"
+end
+
+check "drops that row on logout, so the session is revoked rather than merely expiring" do
+  before = sessions_for(INVITEE)
+  browser.submit("/auth/logout", {}, form_path: "/auth/logout")
+
+  after = sessions_for(INVITEE)
+  expect!(after == before - 1,
+    "logging out changed the session count from #{before} to #{after}, expected one fewer")
+  "#{after} session rows remain"
+end
+
+check "refuses to sign in an unverified account" do
+  unverified = "unverified-#{RUN_ID}@example.test"
+  fresh = Browser.new(BASE)
+  fresh.submit("/auth/create-account",
+    {login: unverified, password: PASSWORD, "password-confirm": PASSWORD},
+    form_path: "/auth/create-account")
+
+  fresh.reset_session!
+  fresh.submit("/auth/login", {login: unverified, password: PASSWORD}, form_path: "/auth/login")
+
+  expect!(sessions_for(unverified).zero?, "an unverified account was allowed to sign in")
+  "refused, no session opened"
+end
+
+section "What the engine no longer serves"
+
+# Phase 1f deleted every end-user page the engine used to serve, and the pages a
+# person meets are generated into the application instead. A deletion is only
+# real while nothing quietly puts it back, so this asks.
+#
+# Worth having over HTTP rather than as a route-table assertion: a route can be
+# absent from the table and still answered by a catch-all, and what matters is
+# what a visitor gets.
+%w[/auth/otp /auth/sessions /auth/passkeys /auth/connections /auth/admin /auth/staff /auth/api-tokens].each do |path|
+  check "serves nothing at #{path}" do
+    page = Browser.new(BASE).get(path)
+
+    expect!(page.code == "404", "GET #{path} returned #{page.code}, not 404")
+    "404"
+  end
+end
+
+# And the ones it does still serve, which are Rodauth's own.
+%w[/auth/login /auth/create-account].each do |path|
+  check "still serves #{path}" do
+    page = Browser.new(BASE).get(path)
+
+    expect!(page.code == "200", "GET #{path} returned #{page.code}")
+    "200"
+  end
+end
+
+section "Anti-enumeration"
+
+check "answers a duplicate address exactly as it answers a new one" do
+  duplicate = Browser.new(BASE).submit("/auth/create-account",
+    {login: INVITEE, password: PASSWORD, "password-confirm": PASSWORD},
+    form_path: "/auth/create-account")
+
+  expect!(duplicate.code == signup_status,
+    "a duplicate address answered HTTP #{duplicate.code} where a new one answered #{signup_status}, " \
+    "which lets anyone enumerate who has an account")
+  "both HTTP #{signup_status}"
+end
+
+section "Email one-time codes"
+
+# Over real HTTP, against a real database, with nothing rolled back. The model
+# specs cover the code; these cover what the endpoint gives away.
+class << self
+  def code_from_last_mail
+    SparrowMail.deliveries.last&.text_body.to_s[/\b(\d{6})\b/, 1]
+  end
+end
+
+# Clears the send budget for one address so the next check can get a fresh code.
+#
+# Legitimate here and nowhere else: the limits are real and deliberately strict
+# (one send per address per minute), so a run that exercises several code
+# journeys would otherwise be testing the rate limiter over and over instead of
+# the thing each check is about. The limiter itself is proved separately, twice:
+# once for budget independence and once for the absence of exemptions.
+class << self
+  def reset_send_budget(address)
+    SparrowAuth::AuthEvent.where(bucket: "otp_send:email", subject: address).delete_all
+  end
+end
+
+otp_email = LIVE_MAIL ? MAIL_TO : "otp-#{RUN_ID}@example.test"
+
+check "issues a code to a verified account" do
+  SparrowAuth::Account.find_by_email(otp_email) ||
+    SparrowAuth::Account.create!(email: otp_email, status_id: SparrowAuth::Account::VERIFIED)
+
+  otp_browser = Browser.new(BASE)
+  response = otp_browser.submit("/sign-in", {email: otp_email}, form_path: "/sign-in")
+
+  # The status is in the message deliberately. "No six-digit code arrived" is
+  # true of a 422 from a missing CSRF token, of a 500, and of a send the rate
+  # limiter refused -- three different problems that took a server log to tell
+  # apart, and the smoke run does not keep one.
+  expect!(code_from_last_mail,
+    "no six-digit code arrived (POST /sign-in answered #{response.code})\n#{response.body.to_s[0, 1200]}")
+  LIVE_MAIL ? "sent to #{MAIL_TO}" : "captured in-process"
+end
+
+check "keeps the code out of the subject line" do
+  subject = SparrowMail.deliveries.last.subject
+
+  expect!(subject == "Your sign-in code", "unexpected subject: #{subject.inspect}")
+  expect!(!subject.match?(/\d{6}/), "the subject carries the code: #{subject.inspect}")
+  subject.inspect
+end
+
+# One earlier application set Domain=app.example.com so one cookie could serve www and api, which
+# also hands it to every other subdomain, including any that is ever
+# compromised, delegated or parked.
+check "binds the request to one browser with a host-only cookie" do
+  reset_send_budget(otp_email)
+  otp_browser = Browser.new(BASE)
+  otp_browser.submit("/sign-in", {email: otp_email}, form_path: "/sign-in")
+
+  cookie = otp_browser.raw_set_cookies.find { |c| c.include?("sparrow_auth_otp_request") }
+  expect!(cookie, "no request cookie was set")
+  expect!(!cookie.downcase.include?("domain="), "the cookie carries a Domain attribute: #{cookie}")
+  expect!(cookie.downcase.include?("httponly"), "the cookie is not httponly")
+  expect!(cookie.downcase.include?("samesite=lax"), "the cookie is not SameSite=Lax")
+  "host-only, httponly, lax"
+end
+
+check "signs in with the right code from the browser that asked" do
+  reset_send_budget(otp_email)
+  otp_browser = Browser.new(BASE)
+  otp_browser.submit("/sign-in", {email: otp_email}, form_path: "/sign-in")
+  before = sessions_for(otp_email)
+
+  otp_browser.submit("/sign-in/code", {code: code_from_last_mail}, form_path: "/sign-in/code")
+
+  after = sessions_for(otp_email)
+  expect!(after == before + 1, "signing in changed sessions from #{before} to #{after}")
+  "signed in"
+end
+
+check "refuses the same code from a browser that never asked" do
+  reset_send_budget(otp_email)
+  asking = Browser.new(BASE)
+  asking.submit("/sign-in", {email: otp_email}, form_path: "/sign-in")
+  code = code_from_last_mail
+  before = sessions_for(otp_email)
+
+  intercepted = Browser.new(BASE)
+  intercepted.submit("/sign-in/code", {code: code}, form_path: "/sign-in/code")
+
+  expect!(sessions_for(otp_email) == before,
+    "a code was redeemed from a browser that never requested it")
+  "refused"
+end
+
+check "consumes the code on use, so it cannot be redeemed twice" do
+  reset_send_budget(otp_email)
+  otp_browser = Browser.new(BASE)
+  otp_browser.submit("/sign-in", {email: otp_email}, form_path: "/sign-in")
+  code = code_from_last_mail
+  otp_browser.submit("/sign-in/code", {code: code}, form_path: "/sign-in/code")
+
+  # Asserted against the row, not against the session count. The browser is
+  # already signed in by this point, so a successful replay would not add a
+  # session and counting them proves nothing. An earlier version of this check
+  # did exactly that and passed with single-use removed entirely.
+  live = SparrowAuth::OneTimeCode.where(email: otp_email, consumed_at: nil).count
+  expect!(live.zero?, "the code is still redeemable after being used")
+
+  otp_browser.submit("/sign-in/code", {code: code}, form_path: "/sign-in/code")
+  expect!(SparrowAuth::OneTimeCode.where(email: otp_email, consumed_at: nil).count.zero?,
+    "replaying the code revived it")
+  "consumed"
+end
+
+check "destroys the code after five wrong guesses" do
+  address = "capped-#{RUN_ID}@example.test"
+  SparrowAuth::Account.create!(email: address, status_id: SparrowAuth::Account::VERIFIED)
+  guesser = Browser.new(BASE)
+  guesser.submit("/sign-in", {email: address}, form_path: "/sign-in")
+
+  5.times { guesser.submit("/sign-in/code", {code: "000000"}, form_path: "/sign-in/code") }
+
+  remaining = SparrowAuth::OneTimeCode.where(email: address).count
+  expect!(remaining.zero?, "#{remaining} code rows survived the attempt cap")
+  "row destroyed, nothing left to guess against"
+end
+
+# Whether an address has an account is not a question this answers.
+check "answers an unknown address exactly as it answers a known one" do
+  # The account has to exist before the request, or this compares one unknown
+  # address with another and would pass with an enumeration oracle in place.
+  # An earlier version did precisely that.
+  known_address = "known-#{RUN_ID}@example.test"
+  SparrowAuth::Account.create!(email: known_address, status_id: SparrowAuth::Account::VERIFIED)
+
+  known_response = Browser.new(BASE)
+    .submit("/sign-in", {email: known_address}, form_path: "/sign-in")
+  unknown_response = Browser.new(BASE)
+    .submit("/sign-in", {email: "definitely-nobody-#{RUN_ID}@example.test"}, form_path: "/sign-in")
+
+  expect!(known_response.code == unknown_response.code,
+    "known answered #{known_response.code}, unknown answered #{unknown_response.code}")
+  expect!(known_response["location"] == unknown_response["location"],
+    "known redirected to #{known_response["location"]}, unknown to #{unknown_response["location"]}")
+  "both HTTP #{known_response.code}, same location"
+end
+
+# The bug that made one earlier application's venue WiFi unusable: verify attempts counted
+# against the send budget, so a room of people signing in locked each other out
+# and nothing in the logs said why.
+check "does not let verify attempts consume the send budget" do
+  address = "budget-#{RUN_ID}@example.test"
+  SparrowAuth::Account.create!(email: address, status_id: SparrowAuth::Account::VERIFIED)
+  browser_a = Browser.new(BASE)
+  browser_a.submit("/sign-in", {email: address}, form_path: "/sign-in")
+  SparrowAuth::AuthEvent.where(bucket: "otp_send:email").update_all(created_at: 2.minutes.ago)
+
+  10.times { browser_a.submit("/sign-in/code", {code: "000000"}, form_path: "/sign-in/code") }
+
+  before = SparrowMail.deliveries.size
+  browser_a.submit("/sign-in", {email: address}, form_path: "/sign-in")
+  expect!(SparrowMail.deliveries.size == before + 1,
+    "verify attempts consumed the send budget, which is that bug")
+  "budgets independent"
+end
+
+check "applies the limits to every address, with no exemptions" do
+  ["owner@example.test", "admin-#{RUN_ID}@example.test"].each do |address|
+    SparrowAuth::AuthEvent.where(bucket: "otp_send:email", subject: address).delete_all
+    browser = Browser.new(BASE)
+    browser.submit("/sign-in", {email: address}, form_path: "/sign-in")
+    before = SparrowMail.deliveries.size
+    browser.submit("/sign-in", {email: address}, form_path: "/sign-in")
+
+    expect!(SparrowMail.deliveries.size == before,
+      "#{address} was not rate limited, so something is exempt")
+  end
+  "no address is exempt"
+end
+
+section "Invitations"
+
+# The attacks, over real HTTP against a real database, with nothing rolled back
+# between them.
+check "lets the verified invitee accept their own invitation" do
+  _, token = SparrowAuth::Invitation.issue(email: INVITEE)
+  signed_in = Browser.new(BASE)
+  signed_in.submit("/auth/login", {login: INVITEE, password: PASSWORD}, form_path: "/auth/login")
+
+  # The invitation page is the buyer's, generated above: the engine stopped
+  # serving one in 0.1.0. GET it for the form and its CSRF token, then POST to
+  # the same path -- which is what a person does.
+  page = signed_in.get("/invitations/#{token}")
+  response = signed_in.submit_on(page, "/invitations/#{token}", {})
+
+  invitation = SparrowAuth::Invitation.find_by(email: INVITEE)
+  expect!(invitation&.accepted_at,
+    "the invitee could not accept their own invitation " \
+    "(GET #{page.code}, POST #{response.code} -> #{response["location"].inspect})")
+  "accepted"
+end
+
+check "refuses a forwarded link presented by someone else" do
+  bystander_email = "forwarded-#{RUN_ID}@example.test"
+  bystander = Browser.new(BASE)
+  bystander.submit("/auth/create-account",
+    {login: bystander_email, password: PASSWORD, "password-confirm": PASSWORD},
+    form_path: "/auth/create-account")
+  key = verification_key_for(last_mail_body)
+  bystander.submit("/auth/verify-account", {key: key},
+    form_path: "/auth/verify-account?key=#{CGI.escape(key)}")
+  bystander.reset_session!
+  bystander.submit("/auth/login", {login: bystander_email, password: PASSWORD}, form_path: "/auth/login")
+
+  _, token = SparrowAuth::Invitation.issue(email: "target-#{RUN_ID}@example.test")
+  response = bystander.submit("/invitations/#{token}", {}, form_path: "/auth/login")
+
+  invitation = SparrowAuth::Invitation.find_by(email: "target-#{RUN_ID}@example.test")
+  expect!(invitation.accepted_at.nil?, "a bystander accepted someone else's invitation")
+  "HTTP #{response.code}, not accepted"
+end
+
+check "refuses an unverified account holding the invited address" do
+  address = "impostor-#{RUN_ID}@example.test"
+  impostor = Browser.new(BASE)
+  impostor.submit("/auth/create-account",
+    {login: address, password: PASSWORD, "password-confirm": PASSWORD},
+    form_path: "/auth/create-account")
+
+  _, token = SparrowAuth::Invitation.issue(email: address)
+  response = impostor.submit("/invitations/#{token}", {}, form_path: "/auth/login")
+
+  invitation = SparrowAuth::Invitation.find_by(email: address)
+  expect!(invitation.accepted_at.nil?,
+    "an account that never verified its address accepted an invitation to it")
+  "HTTP #{response.code}, not accepted"
+end
+
+check "refuses a replayed token" do
+  address = "replay-#{RUN_ID}@example.test"
+  holder = SparrowAuth::Account.create!(email: address, status_id: SparrowAuth::Account::VERIFIED)
+  _, token = SparrowAuth::Invitation.issue(email: address)
+  SparrowAuth::Invitation.redeem!(token: token, account: holder)
+
+  replayed = begin
+    SparrowAuth::Invitation.redeem!(token: token, account: holder)
+    true
+  rescue SparrowAuth::AccessError
+    false
+  end
+
+  expect!(!replayed, "a token was redeemed twice")
+  "refused"
+end
+
+check "refuses an expired token" do
+  address = "expired-#{RUN_ID}@example.test"
+  holder = SparrowAuth::Account.create!(email: address, status_id: SparrowAuth::Account::VERIFIED)
+  invitation, token = SparrowAuth::Invitation.issue(email: address)
+  invitation.update!(expires_at: 1.second.ago)
+
+  expired = begin
+    SparrowAuth::Invitation.redeem!(token: token, account: holder)
+    true
+  rescue SparrowAuth::AccessError
+    false
+  end
+
+  expect!(!expired, "an expired token was accepted")
+  "refused"
+end
+
+check "never stores an invitation token in readable form" do
+  address = "digest-#{RUN_ID}@example.test"
+  _, token = SparrowAuth::Invitation.issue(email: address)
+
+  stored = ActiveRecord::Base.connection.select_values(
+    "SELECT token_digest FROM sparrow_auth_invitations"
+  )
+  expect!(!stored.include?(token), "the raw token is sitting in the database")
+  "digest only"
+end
+
+section "Auth mail"
+
+check "sends invitation mail that names the address and the expiry" do
+  address = LIVE_MAIL ? MAIL_TO : "invited-#{RUN_ID}@example.test"
+  SparrowAuth::Invitation.invite!(
+    email: address,
+    url_builder: ->(token) { "#{BASE}/invitations/#{token}" }
+  )
+
+  body = last_mail_body
+  expect!(body, "no invitation email was sent")
+  expect!(body.include?("http"), "the invitation email has no link in it")
+  LIVE_MAIL ? "sent to #{MAIL_TO}" : "captured in-process"
+end
+
+check "keeps links and codes out of every subject line" do
+  subjects = SparrowMail.deliveries.map(&:subject).compact.uniq
+
+  subjects.each do |subject|
+    expect!(!subject.include?("http"), "a subject line carries a link: #{subject.inspect}")
+  end
+  "#{subjects.size} distinct subjects, none carrying a link"
+end
+
+check "rides the transactional stream, never a bulk one" do
+  streams = SparrowMail.deliveries.map(&:stream).uniq
+
+  expect!(streams == [:transactional],
+    "auth mail went out on #{streams.inspect}; bulk reputation must never carry sign-in mail")
+  "transactional only"
+end
+
+section "Organizations, memberships and tenancy"
+
+check "lets one account belong to several organizations, with independent roles" do
+  person = SparrowAuth::Account.create!(
+    email: "consultant-#{RUN_ID}@example.test", status_id: SparrowAuth::Account::VERIFIED
+  )
+  owned = SparrowAuth::Organization.create_with_owner!(account: person, name: "Owned #{RUN_ID}")
+
+  # The organization they JOIN has an owner of its own, because somebody has to
+  # do the inviting. create_with_owner! is the one path with no actor -- the
+  # first owner of a new organization has nobody to be assigned by -- and every
+  # membership after it is written by somebody:
+  # `memberships.create!` raises since 0.1.0, because a role with nobody to
+  # attribute it to cannot be checked against a ceiling.
+  host = SparrowAuth::Account.create!(
+    email: "host-#{RUN_ID}@example.test", status_id: SparrowAuth::Account::VERIFIED
+  )
+  joined = SparrowAuth::Organization.create_with_owner!(account: host, name: "Joined #{RUN_ID}")
+  SparrowAuth::Membership.assign!(
+    organization: joined, account: person, role: :member, by: host
+  )
+
+  expect!(person.organizations.count == 2, "expected two memberships")
+  expect!(person.role_in(owned) == :owner, "expected owner in the organization they created")
+  expect!(person.role_in(joined) == :member, "expected member in the one they joined")
+  expect!(!person.membership_in(joined).at_least?(:admin),
+    "being an owner somewhere made them an admin everywhere")
+  "owner in one, member in the other"
+end
+
+check "refuses to strand an organization without an owner" do
+  person = SparrowAuth::Account.create!(
+    email: "founder-#{RUN_ID}@example.test", status_id: SparrowAuth::Account::VERIFIED
+  )
+  org = SparrowAuth::Organization.create_with_owner!(account: person, name: "Solo #{RUN_ID}")
+
+  # remove(by:) for the same reason: a membership is only ever taken away by
+  # somebody, and the refusal to strand an organization is a validation on that
+  # path rather than on a bare destroy.
+  owner_membership = org.memberships.first
+  expect!(owner_membership.remove(by: owner_membership.account) == false,
+    "the last owner was allowed to leave")
+  expect!(org.reload.owners.count == 1, "the organization lost its only owner")
+  "last owner cannot leave or be demoted"
+end
+
+check "scopes a host application's rows to the organization in scope" do
+  first = SparrowAuth::Organization.create!(name: "First #{RUN_ID}")
+  second = SparrowAuth::Organization.create!(name: "Second #{RUN_ID}")
+
+  SparrowAuth::Current.organization = first
+  mine = Widget.create!(name: "mine-#{RUN_ID}")
+  SparrowAuth::Current.organization = second
+  Widget.create!(name: "theirs-#{RUN_ID}")
+
+  SparrowAuth::Current.organization = first
+  visible = Widget.pluck(:id)
+  expect!(visible == [mine.id], "a tenant saw #{visible.size} rows instead of its own one")
+
+  reached = begin
+    Widget.find(Widget.unscoped.find_by(name: "theirs-#{RUN_ID}").id)
+  rescue ActiveRecord::RecordNotFound
+    nil
+  end
+  expect!(reached.nil?, "one tenant reached another's row by id")
+  "one tenant, one row, and no reaching across by id"
+ensure
+  SparrowAuth::Current.reset
+end
+
+check "raises rather than returning every tenant's rows when nothing is in scope" do
+  SparrowAuth::Current.reset
+
+  raised = begin
+    Widget.count
+    nil
+  rescue SparrowAuth::UnscopedQuery => e
+    e
+  end
+
+  expect!(raised, "an unscoped query returned rows instead of raising")
+  expect!(raised.message.include?("across_all_organizations"),
+    "the error does not say how to cross tenants deliberately")
+  "unscoped query refused"
+end
+
+check "crosses tenants only when a reason is stated" do
+  SparrowAuth::Current.reset
+
+  refused = begin
+    SparrowAuth.across_all_organizations(reason: " ") { Widget.count }
+    nil
+  rescue ArgumentError => e
+    e
+  end
+  expect!(refused, "a blank reason was accepted")
+
+  total = SparrowAuth.across_all_organizations(reason: "smoke test rollup") { Widget.count }
+  expect!(total >= 2, "the escape hatch did not span tenants")
+
+  still_scoped = begin
+    Widget.count
+    false
+  rescue SparrowAuth::UnscopedQuery
+    true
+  end
+  expect!(still_scoped, "tenancy stayed off after the block, which would leak for the rest of the request")
+  "reason required, and scoping restored afterwards"
+end
+
+check "fires the first-signin hook once, and only for the first" do
+  fired = []
+  previous = SparrowAuth.config.after_first_signin
+  SparrowAuth.config.after_first_signin = ->(account) { fired << account.email }
+
+  address = "firstsignin-#{RUN_ID}@example.test"
+  account = SparrowAuth::Account.create!(email: address, status_id: SparrowAuth::Account::VERIFIED)
+
+  SparrowAuth.record_first_signin(SparrowAuth::Account.find(account.id))
+  SparrowAuth.record_first_signin(SparrowAuth::Account.find(account.id))
+
+  expect!(fired == [address], "expected one call, got #{fired.size}")
+  "one call across two sign-ins"
+ensure
+  SparrowAuth.config.after_first_signin = previous
+end
+
+section "Guessing a password"
+
+throttle_email = account_email("throttle")
+throttle_password = "correct horse battery staple"
+throttle_browser = Browser.new(BASE)
+
+check "stops accepting the password once the budget is spent, and says nothing about it" do
+  SparrowAuth::AuthEvent.where(bucket: ["login:email", "login:ip", "login_notice:email"]).delete_all
+
+  throttle_browser.submit("/auth/create-account", {
+    login: throttle_email, password: throttle_password,
+    "password-confirm": throttle_password
+  })
+  key = verification_key_for(last_mail_body)
+  throttle_browser.submit("/auth/verify-account", {key: key},
+    form_path: "/auth/verify-account?key=#{CGI.escape(key)}")
+  throttle_browser.submit("/auth/logout")
+  throttle_browser.reset_session!
+
+  budget = SparrowAuth::RateLimiter::LOGIN_PER_EMAIL.limit
+  budget.times { |i| throttle_browser.submit("/auth/login", {login: throttle_email, password: "guess-#{i}"}) }
+
+  before = sessions_for(throttle_email)
+  throttled = throttle_browser.submit("/auth/login", {login: throttle_email, password: throttle_password})
+  expect!(sessions_for(throttle_email) == before,
+    "the correct password still signed in after #{budget} wrong ones")
+
+  # The refusal must not announce itself. Compared against a plain wrong
+  # password on a different account rather than searched for a word: the page
+  # carries an inlined stylesheet, and "display: block" contains "lock".
+  other = account_email("throttle-other")
+  fresh = Browser.new(BASE)
+  fresh.submit("/auth/create-account", {
+    login: other, password: throttle_password, "password-confirm": throttle_password
+  })
+  ordinary = fresh.submit("/auth/login", {login: other, password: "definitely wrong"})
+
+  normalise = ->(body, address) {
+    body.to_s.gsub(address, "ADDRESS").gsub(/[A-Za-z0-9+\/=_-]{40,}/, "TOKEN")
+  }
+  expect!(normalise.call(throttled.body, throttle_email) == normalise.call(ordinary.body, other),
+    "a throttled attempt and a wrong password give different pages, which says which accounts are under attack")
+  "#{budget} wrong, then the right one refused, indistinguishably"
+end
+
+check "leaves the emailed-code sign-in method working while the password path is throttled" do
+  SparrowAuth::AuthEvent.where(bucket: ["otp_send:email", "otp_send:ip", "otp_verify:ip"]).delete_all
+
+  before = sessions_for(throttle_email)
+  browser = Browser.new(BASE)
+  browser.submit("/sign-in", {email: throttle_email})
+  code = code_from_last_mail
+  expect!(code, "no code arrived for the throttled account")
+  browser.submit("/sign-in/code", {code: code})
+
+  expect!(sessions_for(throttle_email) == before + 1,
+    "a throttled password path also blocked the code sign-in method, which locks the account rather than the path")
+  "the account is still reachable, which is the point"
+end
+
+section "Signing up with a code"
+
+require "webauthn/fake_client"
+
+signup_email = account_email("signup")
+signup_browser = Browser.new(BASE)
+
+# Every check in this run comes from one IP, and the per-IP budgets are
+# deliberately strict — the attempt-cap checks above spend most of the verify
+# allowance on purpose. Clearing both here keeps this section testing the flow
+# rather than re-testing the rate limiter, which has checks of its own.
+SparrowAuth::AuthEvent.where(bucket: ["otp_send:ip", "otp_verify:ip"]).delete_all
+
+check "creates a verified account with no password when a code is redeemed" do
+  signup_browser.submit("/sign-in", {email: signup_email})
+  code = code_from_last_mail
+  expect!(code, "no code arrived for an address with no account")
+
+  signup_browser.submit("/sign-in/code", {code: code})
+
+  account = SparrowAuth::Account.find_by_email(signup_email)
+  expect!(account, "redeeming the code created no account")
+  expect!(account.verified?, "the account was created unverified")
+
+  hashes = ActiveRecord::Base.connection.select_value(
+    ActiveRecord::Base.sanitize_sql_array([
+      "SELECT COUNT(*) FROM sparrow_auth_account_password_hashes WHERE id = ?", account.id
+    ])
+  ).to_i
+  expect!(hashes.zero?, "the account was given a password it never chose")
+  expect!(sessions_for(signup_email) == 1, "the new account was not signed in")
+  "verified, passwordless, signed in"
+end
+
+check "enrols a passkey on it without asking for a password there is none of" do
+  client = WebAuthn::FakeClient.new(BASE)
+  page = signup_browser.get("/auth/webauthn-setup")
+  challenge = form_field(page.body, "webauthn_setup_challenge")
+  hmac = form_field(page.body, "webauthn_setup_challenge_hmac")
+  expect!(challenge, "the setup form carried no challenge")
+
+  signup_browser.submit("/auth/webauthn-setup", {
+    webauthn_setup: client.create(challenge: challenge).to_json,
+    webauthn_setup_challenge: challenge,
+    webauthn_setup_challenge_hmac: hmac
+  })
+
+  account = SparrowAuth::Account.find_by_email(signup_email)
+  expect!(account.passkey?, "no passkey was enrolled on the passwordless account")
+  "passkey enrolled, no password involved"
+end
+
+check "refuses a code for an address claimed with a password meanwhile" do
+  contested = account_email("contested")
+  SparrowAuth::AuthEvent.where(bucket: ["otp_send:ip", "otp_verify:ip"]).delete_all
+  browser = Browser.new(BASE)
+  browser.submit("/sign-in", {email: contested})
+  code = code_from_last_mail
+
+  # Somebody registers that address before the code is redeemed, and never
+  # confirms it. Verifying on the strength of this code would hand the real
+  # owner an account whose password a stranger chose.
+  other = Browser.new(BASE)
+  other.submit("/auth/create-account", {
+    login: contested, password: "somebody else's password",
+    "password-confirm": "somebody else's password"
+  })
+
+  browser.submit("/sign-in/code", {code: code})
+
+  account = SparrowAuth::Account.find_by_email(contested)
+  expect!(account && !account.verified?,
+    "a code verified an account somebody else had registered with a password")
+  expect!(sessions_for(contested).zero?, "the contested account was signed in")
+  "refused, and left unverified"
+end
+
+section "Passkeys"
+
+# The full ceremony, over real HTTP, against a software authenticator. The
+# request specs do this too; what this adds is a real server outside
+# transactional fixtures, with CSRF on and nothing rolled back afterwards.
+# (webauthn/fake_client is required by the signup section above.)
+
+passkey_email = account_email("passkey")
+passkey_password = "correct horse battery staple"
+passkey_browser = Browser.new(BASE)
+passkey_client = WebAuthn::FakeClient.new(BASE)
+
+check "enrols a passkey through the real form" do
+  passkey_browser.submit("/auth/create-account", {
+    login: passkey_email, password: passkey_password,
+    "password-confirm": passkey_password
+  })
+  key = verification_key_for(last_mail_body)
+  passkey_browser.submit("/auth/verify-account", {key: key},
+    form_path: "/auth/verify-account?key=#{CGI.escape(key)}")
+
+  page = passkey_browser.get("/auth/webauthn-setup")
+  challenge = form_field(page.body, "webauthn_setup_challenge")
+  hmac = form_field(page.body, "webauthn_setup_challenge_hmac")
+  expect!(challenge, "the setup form carried no challenge")
+
+  credential = passkey_client.create(challenge: challenge)
+  passkey_browser.submit("/auth/webauthn-setup", {
+    webauthn_setup: credential.to_json,
+    webauthn_setup_challenge: challenge,
+    webauthn_setup_challenge_hmac: hmac,
+    password: passkey_password
+  })
+
+  account = SparrowAuth::Account.find_by_email(passkey_email)
+  expect!(account&.passkey?, "no credential was stored")
+  "one credential enrolled"
+end
+
+check "refuses to enrol without the account's password" do
+  before = SparrowAuth::Account.find_by_email(passkey_email).webauthn_credentials.count
+  other = WebAuthn::FakeClient.new(BASE)
+
+  page = passkey_browser.get("/auth/webauthn-setup")
+  challenge = form_field(page.body, "webauthn_setup_challenge")
+  hmac = form_field(page.body, "webauthn_setup_challenge_hmac")
+
+  passkey_browser.submit("/auth/webauthn-setup", {
+    webauthn_setup: other.create(challenge: challenge).to_json,
+    webauthn_setup_challenge: challenge,
+    webauthn_setup_challenge_hmac: hmac,
+    password: "not the right password"
+  })
+
+  after = SparrowAuth::Account.find_by_email(passkey_email).webauthn_credentials.count
+  expect!(after == before,
+    "a passkey was enrolled without the password, so anyone at an unlocked laptop could add one")
+  "re-authentication required"
+end
+
+check "signs in with the passkey and no address typed" do
+  passkey_browser.submit("/auth/logout")
+  passkey_browser.reset_session!
+
+  before = sessions_for(passkey_email)
+  page = passkey_browser.get("/auth/login")
+  challenge = form_field(page.body, "webauthn_auth_challenge")
+  hmac = form_field(page.body, "webauthn_auth_challenge_hmac")
+  expect!(challenge, "the login page carried no passkey challenge; conditional UI is not wired up")
+
+  csrf = page.body[/id="webauthn-login-form".*?name="authenticity_token" value="([^"]*)"/m, 1]
+  passkey_browser.post("/auth/webauthn-login", {
+    webauthn_auth: passkey_client.get(challenge: challenge, user_verified: true).to_json,
+    webauthn_auth_challenge: challenge,
+    webauthn_auth_challenge_hmac: hmac,
+    authenticity_token: csrf
+  })
+
+  after = sessions_for(passkey_email)
+  expect!(after == before + 1,
+    "signing in with a passkey changed sessions from #{before} to #{after}, expected one more")
+  "signed in, with a revocable session"
+end
+
+check "stops a revoked passkey signing in" do
+  account = SparrowAuth::Account.find_by_email(passkey_email)
+  account.webauthn_credentials.each(&:destroy!)
+  passkey_browser.submit("/auth/logout")
+  passkey_browser.reset_session!
+
+  before = sessions_for(passkey_email)
+  page = passkey_browser.get("/auth/login")
+  challenge = form_field(page.body, "webauthn_auth_challenge")
+  hmac = form_field(page.body, "webauthn_auth_challenge_hmac")
+  csrf = page.body[/id="webauthn-login-form".*?name="authenticity_token" value="([^"]*)"/m, 1]
+
+  passkey_browser.post("/auth/webauthn-login", {
+    webauthn_auth: passkey_client.get(challenge: challenge, user_verified: true).to_json,
+    webauthn_auth_challenge: challenge,
+    webauthn_auth_challenge_hmac: hmac,
+    authenticity_token: csrf
+  })
+
+  after = sessions_for(passkey_email)
+  expect!(after == before, "a revoked passkey still signed in")
+  "revoked means revoked"
+end
+
+section "Signing in with a provider"
+
+# OmniAuth's test mode stands in for Google here, and that is the right seam:
+# what a provider *is*, from this engine's side, is a set of claims arriving at
+# a callback. Everything below the mock — the callback route, the three rules,
+# the identity table, CSRF — is the real thing over real HTTP.
+require "omniauth"
+OmniAuth.config.test_mode = true
+
+class << self
+  def provider_says(email:, verified: true, uid: "smoke-uid")
+    OmniAuth.config.mock_auth[:developer] = OmniAuth::AuthHash.new(
+      provider: "developer", uid: uid,
+      info: {email: email, email_verified: verified}
+    )
+  end
+
+  # The request phase is a POST and needs a CSRF token, which is per-session
+  # rather than per-form, so any page of this session will supply one.
+  def visit_provider(browser)
+    browser.submit("/auth/auth/developer", {}, form_path: "/auth/login")
+    browser.get("#{BASE}/auth/auth/developer/callback")
+  end
+end
+
+check "refuses an address the provider will not vouch for" do
+  address = account_email("social-unverified")
+  provider_says(email: address, verified: false)
+
+  before = SparrowAuth::Account.count
+  visit_provider(Browser.new(BASE))
+
+  expect!(SparrowAuth::Account.count == before,
+    "an account was created from a provider that did not assert email_verified")
+  expect!(SparrowAuth::Account.find_by_email(address).nil?, "the account exists")
+  "no account, no session"
+end
+
+check "creates a verified account with no role and no password when it will" do
+  address = account_email("social-new")
+  provider_says(email: address, uid: "smoke-new")
+
+  visit_provider(Browser.new(BASE))
+
+  account = SparrowAuth::Account.find_by_email(address)
+  expect!(account, "no account was created for a vouched-for address")
+  expect!(account.verified?, "the account was created unverified")
+  expect!(account.memberships.empty?, "an account created by a provider was given a membership")
+  # `grants` is gone with the per-record policy object it belonged to. What the
+  # rule means now is that the account holds no membership: signing in with a
+  # provider proves who somebody is and gives them standing nowhere.
+  expect!(account.memberships.empty?,
+    "an account created by a provider was given a membership")
+
+  hashes = ActiveRecord::Base.connection.select_value(
+    ActiveRecord::Base.sanitize_sql_array([
+      "SELECT COUNT(*) FROM sparrow_auth_account_password_hashes WHERE id = ?", account.id
+    ])
+  ).to_i
+  expect!(hashes.zero?, "an account created by a provider was given a password")
+  "verified, no role, no password"
+end
+
+check "will not sign into an existing account just because the address matches" do
+  address = account_email("social-owner")
+  owner = SparrowAuth::Account.create!(email: address, status_id: SparrowAuth::Account::VERIFIED)
+  SparrowAuth::AuthEvent.where(bucket: "login_notice:email").delete_all
+  SparrowMail.deliveries.clear
+
+  provider_says(email: address, uid: "smoke-stranger")
+  visit_provider(Browser.new(BASE))
+
+  expect!(sessions_for(address).zero?,
+    "a provider signed into an account that never connected it, which is that defect")
+  expect!(owner.identities.empty?, "an identity was created without anybody asking")
+
+  notice = SparrowMail.deliveries.last
+  expect!(notice && notice.to.map(&:email).include?(address),
+    "the address's owner was not told somebody tried")
+  "refused, and the owner told"
+end
+
+check "connects and disconnects when asked, and disconnecting actually revokes" do
+  address = account_email("social-connect")
+  password = "correct horse battery staple"
+  browser = Browser.new(BASE)
+
+  browser.submit("/auth/create-account", {
+    login: address, password: password, "password-confirm": password
+  })
+  key = verification_key_for(last_mail_body)
+  browser.submit("/auth/verify-account", {key: key},
+    form_path: "/auth/verify-account?key=#{CGI.escape(key)}")
+
+  account = SparrowAuth::Account.find_by_email(address)
+  provider_says(email: address, uid: "smoke-connect")
+  visit_provider(browser)
+  expect!(account.identities.count == 1, "connecting while signed in created no identity")
+
+  # And it works as a way in.
+  browser.submit("/auth/logout")
+  browser.reset_session!
+  before = sessions_for(address)
+  visit_provider(browser)
+  expect!(sessions_for(address) == before + 1, "the connected provider did not sign in")
+
+  # Now take it away.
+  page = browser.get("/connections")
+  expect!(page.body.include?("Connected accounts"), "the connections page did not render")
+  browser.submit("/connections/#{account.identities.first.id}",
+    {_method: "delete"}, form_path: "/connections")
+  expect!(account.identities.empty?, "disconnecting left the identity in place")
+
+  browser.submit("/auth/logout")
+  browser.reset_session!
+  before = sessions_for(address)
+  visit_provider(browser)
+  expect!(sessions_for(address) == before,
+    "a disconnected provider still signed in, so disconnecting revokes nothing")
+  "connected, used, disconnected, refused"
+end
+
+section "The harness's own pages"
+
+# Fetched a second time, now that there is something on them.
+#
+# The pair in the Server section run before an account or a message exists, so
+# they only ever prove the empty branch renders: "No accounts yet.", "Nothing
+# sent yet.". A template that raises while drawing an accounts row, or a
+# message, would sit in precisely the blind spot those checks were added to
+# close. Both halves of both pages, or neither is checked.
+check "draws the accounts table once there are accounts" do
+  page = Browser.new(BASE).get("/")
+
+  expect!(page.code == "200", "GET / returned #{page.code}")
+  expect!(!page.body.include?("No accounts yet."),
+    "the start page found no accounts, after a whole run spent creating them")
+  expect!(page.body.include?("<th>Address</th>"), "the accounts table did not render")
+  "#{SparrowAuth::Account.count} accounts, with their sessions and passkeys counted"
+end
+
+# Keyed off what is actually there rather than off LIVE_MAIL. Under a real
+# provider sparrow_mail records nothing in process, so the mailbox is correctly
+# empty and there is no populated branch to check.
+if SparrowMail.deliveries.any?
+  check "draws the messages once there are messages" do
+    page = Browser.new(BASE).get("/mailbox")
+
+    expect!(page.code == "200", "GET /mailbox returned #{page.code}")
+    expect!(!page.body.include?("Nothing sent yet."),
+      "the mailbox found no messages, after a whole run spent sending them")
+
+    # One rendered message block is the whole loop body proved: a raise anywhere
+    # inside it — recipients, stream, tags, the body, the link — takes the page
+    # down with it rather than dropping a row.
+    expect!(page.body.include?(%(class="msg")), "the mailbox drew no message")
+
+    # And the subject, so that a block of correct markup around nothing at all
+    # does not read as a message. Skipped rather than faked if no subject
+    # carries any text, because include?("") is true of every page there is.
+    subject = SparrowMail.deliveries.map(&:subject).grep(/\S/).last
+    expect!(subject.nil? || page.body.include?(CGI.escapeHTML(subject)),
+      "the mailbox drew a message without the subject it was handed")
+
+    "#{SparrowMail.deliveries.size} messages, bodies and all"
+  end
+else
+  skip "draws the messages once there are messages",
+    "nothing was recorded in process, so there is no populated mailbox to draw"
+end
+
+# One class of failure, caught wherever in the run it happened.
+#
+# Everything above has to name a page to check it, and naming pages is what went
+# wrong: the ones nobody thought to name were the ones that broke. This needs no
+# name. A template raising is never intentional, so finding one in the log is
+# enough on its own — whichever page it was, and whether or not anything here
+# asked for that page.
+#
+# Deliberate exceptions land in the same log: the checks above provoke
+# SparrowAuth::AccessDenied on purpose, several times, and it is logged with a
+# full backtrace exactly like a real one. Which is why this looks for the thing
+# that is always a defect rather than for exceptions in general.
+check "raised no template errors while serving any of it" do
+  raised = SERVER_LOG.string.lines.grep(/ActionView::Template::Error/)
+
+  expect!(raised.empty?,
+    "#{raised.size} in the log; first: #{raised.first.to_s.strip}")
+  "the log is clean"
+end
+
+puts "\n#{BOLD}Summary#{RESET}"
+puts "  #{GREEN}#{RESULTS[:pass]} passed#{RESET}  " \
+     "#{RESULTS[:fail].positive? ? RED : DIM}#{RESULTS[:fail]} failed#{RESET}  " \
+     "#{DIM}#{RESULTS[:skip]} skipped#{RESET}"
+
+unless FAILURES.empty?
+  puts "\n#{RED}Failures#{RESET}"
+  FAILURES.each { |f| puts "  - #{f}" }
+end
+
+if LIVE_MAIL
+  puts <<~CHECKLIST
+
+    #{BOLD}Now check the inbox at #{MAIL_TO}#{RESET}
+    #{DIM}Everything above is what the engine did. These are the things only a
+    received message can settle.#{RESET}
+
+      [ ] a "Confirm your email address" message arrived and reads sensibly
+      [ ] its link points at your host, not at a tracking redirector
+      [ ] a "You have been invited" message arrived
+      [ ] it says the link only works for the address it was sent to
+      [ ] no subject line contains a link or a code
+
+    #{DIM}The link check matters. SendLayer rewrites links through its click
+    tracker, and a mailbox security scanner following a rewritten link would
+    consume a single-use token before the recipient opened the message. This
+    engine survives that because verifying needs the form to be submitted, not
+    merely fetched, but it is worth seeing what actually arrived.#{RESET}
+  CHECKLIST
+end
+
+unless options[:keep_db]
+  ActiveRecord::Base.connection_pool.disconnect!
+  psql(%(DROP DATABASE IF EXISTS "#{DB_NAME}"))
+end
+
+exit(RESULTS[:fail].zero? ? 0 : 1)

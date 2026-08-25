@@ -1,0 +1,229 @@
+# frozen_string_literal: true
+
+# SparrowAuth.
+#
+# THIS FILE IS FOR THE PARTS OF AUTHENTICATION THAT ARE CODE. The callbacks
+# below run inside your application, the roles are yours to extend, and
+# none of it could be expressed as a value in a settings file.
+#
+# Everything that IS just a value — the domain passkeys bind to, where auth
+# mail comes from, which ways in are open, the two signing keys — is set in the
+# SparrowKit control panel instead:
+#
+#   http://localhost:3000/sparrowkit/auth
+#
+# GO THERE FIRST, AND SET webauthn_rp_id BEFORE YOU DEPLOY. It is the domain
+# passkeys are permanently bound to, and the single hardest thing here to
+# change later: a passkey cannot be moved to a different one, so getting it
+# wrong is not undone by a settings change — it is undone by every one of your
+# users enrolling again. Left unset it is derived from whichever origin the
+# first request happens to arrive on, which is fine in development and a coin
+# toss in production.
+#
+# It writes them to `sparrow_auth:` in your Rails encrypted credentials, which
+# this engine reads at boot. `bin/rails credentials:edit` is the same file by
+# hand. Those settings are deliberately NOT repeated here: this file is
+# evaluated after credentials are read, so a line here would silently win over
+# whatever you last saved in the panel, and one value settable in two places
+# eventually disagrees with itself.
+#
+# The full list of what the panel owns is at the bottom of this file.
+#
+# One rule is in neither place because it cannot be configured: an email
+# address is not trusted until it has been verified. There is no setting for
+# that.
+
+SparrowAuth.configure do |config|
+  # ---------------------------------------------------------------------------
+  # 1. Which ways in you want
+  #
+  # Passkeys are always on and email verification is always on. Neither has a
+  # setting, here or anywhere.
+  #
+  # Emailed sign-in is always on too, in one of two shapes: a six-digit code
+  # somebody types, or a link they open. That choice, and whether passwords
+  # exist at all, are values — so they live in the control panel. What is below
+  # is only the parts that are Ruby.
+  # ---------------------------------------------------------------------------
+
+  # How passwords behave, IF you have turned them on in the control panel.
+  # Passwords are off by default, and this engine is complete without them: an
+  # account can be created by code, verified, given a passkey and used for
+  # years with no password ever existing.
+  #
+  # `password_breached` is a check you write, so it lives here. Whether
+  # passwords exist at all is a value, so it lives in the panel.
+  #
+  # config.password_minimum_length = 12
+  # config.password_breached = ->(password) { Pwned.breached?(password) }
+
+  # Social sign-in, off unless you name providers *and* install the gems.
+  # Adding a provider here without omniauth and rodauth-omniauth in your Gemfile
+  # leaves the feature off rather than producing a callback route that raises.
+  #
+  # Three rules are enforced and not configurable: the provider's
+  # email-verified signal is required, an account created this way is granted
+  # nothing, and linking a provider to an existing account is asked for rather
+  # than inferred from a matching address.
+  #
+  # Set the credentials on the control panel rather than here -- the panel
+  # writes them to encrypted credentials, and it tells you which gem each
+  # provider needs and the exact line to add. This is for a provider the panel
+  # does not offer, or for options a strategy takes that a text box cannot.
+  #
+  # config.social_providers = {
+  #   google_oauth2: {client_id: ENV["GOOGLE_CLIENT_ID"], client_secret: ENV["GOOGLE_CLIENT_SECRET"]},
+  #   apple: {client_id: ENV["APPLE_CLIENT_ID"], client_secret: ENV["APPLE_CLIENT_SECRET"]}
+  # }
+
+  # ---------------------------------------------------------------------------
+  # 2. Provisioning — where your application gets told
+  #
+  # These tell you something happened, so you can make whatever your
+  # application needs alongside it. A profile row and a trial are yours; an
+  # organization has a default, below.
+  # ---------------------------------------------------------------------------
+
+  # The first time an account signs in, by any sign-in method, and never again.
+  #
+  # By default a new account is given an organization of its own, which it
+  # owns, so that a fresh install can sign in and start storing things without
+  # setting anything up. Uncomment to provision differently, or set it to nil
+  # to give a new account nothing and seat people by invitation only.
+  # config.after_first_signin = ->(account) {
+  #   Organization.create_with_owner!(account: account, name: "#{account.email}'s workspace")
+  # }
+
+  # After an address is verified for the first time.
+  # config.after_verification = ->(account) { Profile.create!(account: account) }
+
+  # After an invitation is accepted. An invitation that named an organization
+  # has already seated them by the time this runs.
+  # config.after_invitation_accepted = ->(account, invitation) { }
+
+  # Who may invite somebody into an organization, and at what role.
+  #
+  # REQUIRED before any organization invitation can be issued -- SparrowKit
+  # refuses until you say something here. An invitation grants whatever role it
+  # names, and only your application knows which of your people may hand that
+  # out, so this is yours to decide.
+  #
+  # config.authorize_invitation = lambda do |inviter:, organization:, role:|
+  #   inviter.role_in(organization) == "owner"
+  # end
+
+  # After an organization is created.
+  # config.after_organization_created = ->(organization, created_by) { }
+
+  # Where to send somebody after they accept an invitation.
+  # config.after_accept_path = "/"
+
+  # ---------------------------------------------------------------------------
+  # 3. Tenancy and roles
+  # ---------------------------------------------------------------------------
+
+  # How to work out which organization the current request is for. Called with
+  # the controller.
+  #
+  # The default answers an explicit choice held in the session, then the
+  # account's only membership if it has exactly one. It never guesses between
+  # several — picking one for somebody who belongs to three is how a person
+  # writes into the wrong tenant without being told.
+  #
+  # config.organization_for_request = ->(controller) { ... }
+
+  # What your users call the five roles that ship. Presentation only.
+  #
+  # Renaming changes nothing about who may do what. A role is the set of
+  # permissions it holds, and one role reaches another when it holds everything
+  # that one holds — there is no rank and no order, which is what lets you
+  # declare a role of your own that reaches one thing and nothing else.
+  #
+
+  # There is nothing here about what a role may do.
+  #
+  # A role is a name SparrowKit stores and never interprets -- no ladder, no
+  # ranking, no permission list. Decide what your roles permit in your own code,
+  # where you can read it and test it, because only your code knows what they
+  # mean.
+
+  # ---------------------------------------------------------------------------
+  # 4. Rarely changed
+  # ---------------------------------------------------------------------------
+
+  # Where Rodauth serves its routes. Rodauth runs as middleware, above the Rails
+  # router, so this does *not* follow your mount point — the two have to be told
+  # to agree.
+  config.path_prefix = "<%= mount_at %>"
+
+  # Where YOUR sign-in screen lives, if you write one. Rodauth's own pages link
+  # to it, and so do the test helpers, so moving the screen means changing this.
+  #
+  # config.sign_in_path = "/sign-in"
+  #
+  # The second step of that screen, asking for the code. Follows sign_in_path
+  # unless you set it, and only the test helpers read it.
+  #
+  # config.sign_in_code_path = "/sign-in/code"
+
+  # How an emailed sign-in arrives: a six-digit code somebody types, or a link
+  # they open. One or the other -- both would be two ways into the same account
+  # for no benefit, and neither would be an application nobody can get into.
+  #
+  # A code works when the mail is read somewhere else: a phone, a shared
+  # mailbox, a machine that is not this one. A link is one click, and cannot be
+  # finished anywhere but the browser that asked for it -- which is exactly what
+  # stops a mail scanner from spending it, and exactly what makes "read it on my
+  # phone, finish on my laptop" impossible.
+  #
+  # Choosing links also means an address with no account cannot become one by
+  # asking to sign in: a link has to hang on an account that already exists.
+  # New people then arrive by invitation or through create-account.
+  #
+  # Change it here or on the control panel; both are the same setting.
+  #
+  # config.emailed_sign_in = :code
+  # config.emailed_sign_in_link_expiry = 600   # 10 minutes, matching the code
+
+  # config.verify_account_expiry = 86_400      # 24 hours
+  # config.invitation_expiry     = 7 * 86_400  # 7 days
+  # config.mail_stream           = :transactional
+
+  # The origin passkeys are registered against. Defaults to the request's, which
+  # is usually right. Set it only if you terminate TLS somewhere that rewrites
+  # the Host header and cannot be made to stop.
+  #
+  # config.webauthn_origin = "https://example.com"
+
+  # ---------------------------------------------------------------------------
+  # Set in the control panel, not here
+  #
+  #   http://localhost:3000/sparrowkit/auth
+  #
+  # These are plain values rather than code, so they live in your Rails
+  # encrypted credentials under `sparrow_auth:` and this engine reads them at
+  # boot. The panel is a form over that file; `bin/rails credentials:edit` is
+  # the same file by hand.
+  #
+  #   webauthn_rp_id      the domain passkeys are permanently bound to. The
+  #                       single hardest setting to change later: a passkey
+  #                       cannot be moved to a different one, so getting it
+  #                       wrong is undone by every user enrolling again.
+  #   webauthn_rp_name    what the operating system's prompt calls you
+  #   mail_from           where auth mail comes from
+  #   emailed_sign_in     a code somebody types, or a link they open
+  #   signup_with_code    whether an emailed code for an unknown address
+  #                       creates an account
+  #   passwords_enabled   whether passwords exist at all
+  #   otp_secret          signing key for one-time codes
+  #
+  # The signing key is optional. Left unset it is derived through Rails' key
+  # generator, which is stable across boots and distinct from every other
+  # derived key, so a leak of one does not compromise the others. Set it only
+  # to rotate it independently or to share it with another service.
+  #
+  # DELIBERATELY NOT REPEATED ABOVE. This file is evaluated after credentials
+  # are read, so a line here would silently win over whatever you last saved in
+  # the panel — which is exactly the trap this layout exists to remove.
+  # ---------------------------------------------------------------------------
+end

@@ -1,0 +1,50 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# Layer-isolated: sparrow_auth's suite resolves against sparrow_auth's own
+# dependencies only. Nothing from sparrow_pay is reachable from here, which is
+# how the gem boundary stays honest.
+gemspec
+
+# Resolve the lockstep sibling from source during development.
+gem "sparrow_mail", path: "../sparrow_mail"
+
+gem "rake", "~> 13.0"
+
+# :smoke is here because bin/smoke boots the dummy app under RAILS_ENV=smoke,
+# and Bundler.require(*Rails.groups) then asks for [:default, :smoke] only. A
+# gem grouped just :development, :test is never required there, so the first
+# view that names one raises an uninitialized constant and every page on the
+# smoke layout returns 500 -- while bin/smoke still prints all-pass, because
+# its checks do not assert on those pages.
+group :development, :test, :smoke do
+  gem "pg", "~> 1.5"
+  # Both supported databases, so the suite can run against either --
+  # DB=sqlite swaps the dummy application onto SQLite.
+  gem "sqlite3", ">= 2.0"
+  gem "rspec-rails", "~> 7.0"
+  gem "standard", "~> 1.44"
+
+  # The dummy application the engine mounts into runs a real Rails stack against
+  # a real Postgres. An auth engine tested against anything less is testing a
+  # different thing than it ships.
+  gem "puma", "~> 6.0"
+
+  # Social sign-in is opt-in for a host application, so these are deliberately
+  # not runtime dependencies of the gem. An application that wants Google or
+  # Apple already has to add a provider strategy itself, and one that wants
+  # neither should not carry OmniAuth at all. The engine activates the feature
+  # only when a host has both configured providers and installed the gems.
+  #
+  # Here they are development dependencies, so the suite can drive the whole
+  # flow against a test strategy.
+  gem "rodauth-omniauth", "~> 0.6"
+  gem "omniauth", "~> 2.1"
+  gem "omniauth-rails_csrf_protection", "~> 1.0"
+
+  # The smoke harness and mailbox render the generated SparrowKit theme. Test
+  # tooling only -- never a runtime dependency of the engine, which ships
+  # neutral so a customer's end users see the customer's brand.
+  gem "sparrow_ui", path: "../sparrow_ui"
+end

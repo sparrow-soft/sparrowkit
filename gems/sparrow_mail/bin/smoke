@@ -1,0 +1,809 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Bundler first, before anything else is required.
+#
+# Requiring a default gem before this line activates the version shipped with
+# Ruby, and Bundler then refuses to set up because the Gemfile asks for a
+# different one. json is the usual culprit and the error names it, which sends
+# you looking at json rather than at the load order. Doing this here is also
+# what lets the script be run as `bin/smoke` rather than only under
+# `bundle exec` — which is how it is documented, and therefore how it has to
+# work.
+ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
+require "bundler/setup"
+
+# Live smoke test for sparrow_mail.
+#
+# The rspec suite runs against stubbed providers, which proves the adapters do
+# what we believe the APIs do. This proves we believe the right thing. It sends
+# real email through real credentials and reports what came back.
+#
+# It cannot prove everything. Whether the HTML rendered, whether the attachment
+# opens, and whether the X-Sparrow-* control headers really are absent from what
+# lands in an inbox are all things only a human reading a received message can
+# confirm, so the run ends with a checklist of those.
+#
+#   cp .env.smoke.example .env.smoke   # then fill it in; it is gitignored
+#   bin/smoke
+#   bin/smoke --dry-run                # print the plan, send nothing
+#
+# Nothing in here writes a credential to the terminal or anywhere else.
+
+require "cgi"
+require "json"
+require "net/http"
+require "optparse"
+require "resolv"
+require "stringio"
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "lib"))
+
+# Rails first, then the gem. That is the order a real application loads them in
+# (Rails boots, then Bundler.require runs), and it is what lets the Railtie
+# register itself. Loading the gem first would silently skip the Railtie and
+# make the Rails check below fail for a reason that has nothing to do with the
+# gem.
+require "rails"
+require "action_mailer/railtie"
+require "sparrow_mail"
+
+# --- configuration ----------------------------------------------------------
+
+# Loaded from .env.smoke so credentials never have to be typed into a shell
+# where they end up in history.
+# Helpers live on this script's own object, not on Object.
+#
+# A bare `def` at the top level of a Ruby script defines a private instance
+# method on Object, so every object in the process answers to it — including
+# classes inside gems, and including their DSLs. This script's `skip` shadowed
+# BinData's `skip` inside tpm-key_attestation, a transitive dependency of the
+# webauthn gem, and broke it at load time with an arity error pointing at a
+# file with nothing to do with passkeys. Every request then 500'd.
+#
+# `class << self` puts these on main's singleton class instead. Call sites are
+# unchanged, and nothing else in the process can see them.
+class << self
+  def load_env_file(path)
+    return unless File.exist?(path)
+
+    File.readlines(path, encoding: "UTF-8").each do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?("#")
+
+      key, value = line.split("=", 2)
+      next if key.nil? || value.nil?
+
+      ENV[key.strip] ||= value.strip.delete_prefix('"').delete_suffix('"')
+    end
+  end
+end
+
+load_env_file(File.join(ROOT, ".env.smoke"))
+
+options = {dry_run: false}
+OptionParser.new do |parser|
+  parser.banner = "Usage: bin/smoke [options]"
+  parser.on("--dry-run", "Print the plan and send nothing") { options[:dry_run] = true }
+  parser.on("-h", "--help") {
+    puts parser
+    exit 0
+  }
+end.parse!
+
+# Blank is unset. .env.smoke is copied from an example whose optional keys are
+# present but empty, and an empty string is truthy in Ruby, so reading ENV
+# directly makes "SMOKE_SMTP_HOST=" look like a configured relay and then fails
+# the check for a missing address. That is a confusing way to learn you left a
+# line blank.
+class << self
+  def env(name)
+    value = ENV[name]
+    (value.nil? || value.strip.empty?) ? nil : value.strip
+  end
+end
+
+API_KEY = env("SENDLAYER_API_KEY")
+FROM = env("SMOKE_FROM")
+TO = env("SMOKE_TO")
+BCC = env("SMOKE_BCC")
+BROADCAST_KEY = env("SMOKE_BROADCAST_KEY")
+SMTP_HOST = env("SMOKE_SMTP_HOST")
+SMTP_PORT = env("SMOKE_SMTP_PORT")
+SMTP_USER = env("SMOKE_SMTP_USERNAME")
+SMTP_PASS = env("SMOKE_SMTP_PASSWORD")
+
+# Overridable for SendLayer's EU endpoint, and so this harness can be pointed at
+# a local fake to prove the harness itself still works.
+BASE_URL = env("SMOKE_BASE_URL")
+
+# A marker unique to this run, planted in every body. Nothing that reaches a log
+# line or an exception may contain it.
+RUN_ID = Time.now.strftime("%Y%m%d-%H%M%S")
+
+# Planted in every body; nothing reaching a log line or an exception may contain
+# it. Deliberately unremarkable. An earlier version used "SECRET-BODY-<token>",
+# which reads to a spam filter exactly like exfiltrated credentials and helped
+# put a whole run in the junk folder.
+SECRET = "reference #{RUN_ID}"
+
+missing = {
+  "SENDLAYER_API_KEY" => API_KEY,
+  "SMOKE_FROM" => FROM,
+  "SMOKE_TO" => TO
+}.select { |_, value| value.nil? }.keys
+
+unless missing.empty?
+  warn <<~MESSAGE
+    Missing: #{missing.join(", ")}
+
+    Put them in #{File.join(ROOT, ".env.smoke")} (gitignored). See .env.smoke.example.
+
+    SMOKE_FROM must be an address SendLayer has authorised for your account, or
+    every send here fails on the sender rather than on anything this gem did.
+  MESSAGE
+  exit 1
+end
+
+# --- reporting --------------------------------------------------------------
+
+GREEN = "\e[32m"
+RED = "\e[31m"
+YELLOW = "\e[33m"
+DIM = "\e[2m"
+BOLD = "\e[1m"
+RESET = "\e[0m"
+
+RESULTS = {pass: 0, fail: 0, warn: 0, skip: 0}
+FAILURES = []
+
+class << self
+  def section(title)
+    puts "\n#{BOLD}#{title}#{RESET}"
+  end
+end
+
+class << self
+  def check(name)
+    detail = yield
+    RESULTS[:pass] += 1
+    puts "  #{GREEN}pass#{RESET}  #{name}#{"#{DIM} (#{detail})#{RESET}" if detail}"
+  rescue => e
+    RESULTS[:fail] += 1
+    FAILURES << "#{name}: #{e.class}: #{e.message.lines.first&.strip}"
+    puts "  #{RED}FAIL#{RESET}  #{name}"
+    puts "        #{RED}#{e.class}: #{e.message.lines.first&.strip}#{RESET}"
+  end
+end
+
+class << self
+  def warn_check(name, detail)
+    RESULTS[:warn] += 1
+    puts "  #{YELLOW}warn#{RESET}  #{name}"
+    detail.each_line { |line| puts "        #{YELLOW}#{line.chomp}#{RESET}" }
+  end
+end
+
+class << self
+  def skip(name, why)
+    RESULTS[:skip] += 1
+    puts "  #{YELLOW}skip#{RESET}  #{name} #{DIM}(#{why})#{RESET}"
+  end
+end
+
+class << self
+  def expect!(condition, message)
+    raise message unless condition
+  end
+end
+
+# --- the log we assert against ----------------------------------------------
+
+class SmokeLog
+  attr_reader :lines
+
+  def initialize
+    @lines = []
+  end
+
+  %i[debug info warn error fatal unknown].each do |level|
+    define_method(level) { |msg = nil, &blk|
+      @lines << (blk ? blk.call : msg).to_s
+      true
+    }
+  end
+
+  def add(_severity, msg = nil, progname = nil, &blk)
+    @lines << (blk ? blk.call : (msg || progname)).to_s
+    true
+  end
+
+  def text
+    lines.join("\n")
+  end
+
+  def clear
+    @lines = []
+  end
+end
+
+LOG = SmokeLog.new
+
+# --- message building -------------------------------------------------------
+
+class << self
+  def sendlayer_settings(key)
+    {api_key: key}.tap { |s| s[:base_url] = BASE_URL if BASE_URL }
+  end
+end
+
+class << self
+  def message(subject:, text: nil, html: nil, to: TO, cc: nil, bcc: nil,
+    headers: {}, attachments: {})
+    Mail.new.tap do |mail|
+      mail.from = FROM
+      mail.to = to
+      mail.cc = cc if cc
+      mail.bcc = bcc if bcc
+      mail.subject = subject
+
+      headers.each { |name, value| mail.header[name.to_s] = value }
+      attachments.each { |name, body| mail.attachments[name] = body }
+
+      if text && html
+        mail.text_part = Mail::Part.new { body text }
+        mail.html_part = Mail::Part.new do
+          content_type "text/html; charset=UTF-8"
+          body html
+        end
+      elsif html
+        mail.content_type "text/html; charset=UTF-8"
+        mail.body = html
+      else
+        mail.body = text
+      end
+    end
+  end
+end
+
+# --- configuration, from scratch every time ---------------------------------
+
+# SparrowMail.configure yields a memoised configuration object, so a section
+# that sets a flag leaves it set for every section after it. The sandbox check
+# turned config.sandbox on and the Rails check inherited it, which held an
+# ActionMailer message locally and never sent it, while the check still passed
+# because it only asserted that nothing raised.
+#
+# Resetting first makes each section state its own world completely, so no
+# section can be quietly changed by one that ran before it.
+class << self
+  def configure!(adapter:, settings:, sandbox: false, streams: {})
+    SparrowMail.reset!
+    SparrowMail.configure do |config|
+      config.adapter = adapter
+      config.settings = settings
+      config.sandbox = sandbox
+      config.logger = LOG
+      streams.each { |name, options| config.stream(name, **options) }
+    end
+  end
+end
+
+# --- the plan ---------------------------------------------------------------
+
+puts "#{BOLD}sparrow_mail live smoke test#{RESET}"
+puts "#{DIM}run id      #{RUN_ID}#{RESET}"
+puts "#{DIM}from        #{FROM}#{RESET}"
+puts "#{DIM}to          #{TO}#{RESET}"
+puts "#{DIM}bcc         #{BCC || "(not set, bcc checks skipped)"}#{RESET}"
+puts "#{DIM}smtp        #{SMTP_HOST || "(not set, SMTP adapter skipped)"}#{RESET}"
+puts "#{DIM}broadcast   #{BROADCAST_KEY ? "second key set" : "(not set, uses shared_identity)"}#{RESET}"
+puts "#{YELLOW}endpoint    #{BASE_URL} (override, NOT the real provider)#{RESET}" if BASE_URL
+
+if options[:dry_run]
+  puts "\n#{YELLOW}--dry-run: nothing was sent.#{RESET}"
+  puts "Expect roughly 8 real emails to #{TO} on a full run."
+  exit 0
+end
+
+puts "\n#{YELLOW}This sends real email to #{TO}.#{RESET}"
+
+# --- deliverability preflight ----------------------------------------------
+
+# Run before anything is sent, because these are the reasons mail does not
+# arrive, and finding out afterwards means having already spent reputation.
+#
+# None of this is sparrow_mail's job. The gem's job is to hand a well-formed
+# message to a provider, and it can do that perfectly while every message lands
+# in spam. Checking it here anyway is the difference between a smoke test that
+# proves the API accepted the mail and one that suggests whether anyone will
+# read it.
+
+# DNS over HTTPS, with the system resolver only as a fallback.
+#
+# Three things can make a plain resolver lie about a record that is published:
+# it can hold a stale copy of the record set, it can cache a negative answer for
+# the zone's SOA minimum (commonly half an hour), and on a managed or sandboxed
+# network every port 53 query can be redirected to a local resolver no matter
+# which nameserver you name. All three happened while this script was being
+# written, and the result was a correct SPF record being deleted and re-added on
+# the strength of a preflight that could not see it.
+#
+# A preflight that reports a published record as missing is worse than no
+# preflight at all, so this asks over HTTPS, which none of the above touches.
+DOH_ENDPOINTS = ["https://dns.google/resolve", "https://cloudflare-dns.com/dns-query"].freeze
+
+class << self
+  def doh_query(name, type)
+    DOH_ENDPOINTS.each do |endpoint|
+      uri = URI("#{endpoint}?name=#{CGI.escape(name)}&type=#{type}")
+      request = Net::HTTP::Get.new(uri)
+      request["accept"] = "application/dns-json"
+
+      response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 5, read_timeout: 5) do |http|
+        http.request(request)
+      end
+      next unless response.is_a?(Net::HTTPSuccess)
+
+      answers = JSON.parse(response.body)["Answer"] || []
+      return answers.map { |a| a["data"].to_s }
+    rescue
+      next
+    end
+    nil
+  end
+end
+
+class << self
+  def system_resolver
+    @system_resolver ||= Resolv::DNS.new
+  end
+end
+
+# TXT values arrive quoted, and a long record arrives as several quoted chunks
+# that have to be joined rather than treated as separate records.
+class << self
+  def dns_txt(name)
+    answers = doh_query(name, "TXT")
+    return answers.map { |d| d.scan(/"([^"]*)"/).join.then { |s| s.empty? ? d : s } } if answers
+
+    system_resolver.getresources(name, Resolv::DNS::Resource::IN::TXT).map { |r| r.strings.join }
+  rescue Resolv::ResolvError, Resolv::ResolvTimeout
+    []
+  end
+end
+
+class << self
+  def dns_cname(name)
+    answers = doh_query(name, "CNAME")
+    return answers if answers
+
+    system_resolver.getresources(name, Resolv::DNS::Resource::IN::CNAME).map { |r| r.name.to_s }
+  rescue Resolv::ResolvError, Resolv::ResolvTimeout
+    []
+  end
+end
+
+FROM_DOMAIN = FROM[/@([^>\s]+)/, 1].to_s.strip
+
+section "Deliverability preflight for #{FROM_DOMAIN}"
+
+# Worth stating plainly, because this script cannot detect it. DNS can be
+# perfect and mail still fails DMARC if the API key belongs to a different
+# domain than SMOKE_FROM: the provider signs DKIM as the key's domain, that does
+# not align with the From domain, and with no SPF record there is nothing left
+# to pass on. Authenticated-looking mail then lands in spam.
+puts "  #{DIM}note  the key in use must belong to #{FROM_DOMAIN}; a key for another"
+puts "        domain signs DKIM as that domain, which fails DMARC alignment#{RESET}"
+
+# SPF authenticates the envelope sender, not the From header, and an ESP
+# normally sends with its own return path on a subdomain of yours. So an absent
+# apex record does not mean the ESP's mail fails SPF: what matters for DMARC is
+# whether the return-path domain has SPF and aligns with the From domain, which
+# a subdomain does under relaxed alignment. Both are checked, and only the
+# genuinely missing one is reported.
+apex_spf = dns_txt(FROM_DOMAIN).grep(/\Av=spf1/i)
+return_path = %w[sl em mail bounce].find { |prefix| dns_txt("#{prefix}.#{FROM_DOMAIN}").grep(/\Av=spf1/i).any? }
+
+if return_path
+  check("SPF on the provider return path") { "#{return_path}.#{FROM_DOMAIN}, aligns with #{FROM_DOMAIN}" }
+end
+
+if apex_spf.size > 1
+  warn_check "SPF on #{FROM_DOMAIN}", <<~TEXT
+    #{apex_spf.size} v=spf1 records at the apex. More than one is a permerror
+    and fails SPF outright, whatever the records say. Merge them into one.
+  TEXT
+elsif apex_spf.any?
+  check("SPF on #{FROM_DOMAIN}") { apex_spf.first[0, 70] }
+elsif return_path
+  warn_check "SPF on #{FROM_DOMAIN}", <<~TEXT
+    No v=spf1 record at the apex. Mail through this provider still authenticates
+    via #{return_path}.#{FROM_DOMAIN}, so this is probably not why anything is in
+    a spam folder. It does mean anything sending directly as #{FROM_DOMAIN},
+    a mail host or an office suite, has no SPF at all. Worth adding, covering
+    every such sender.
+  TEXT
+else
+  warn_check "SPF", <<~TEXT
+    No v=spf1 record on #{FROM_DOMAIN} and none on a provider return-path
+    subdomain either, so there is nothing for SPF to pass on. With DKIM alone
+    carrying DMARC, a single signing problem fails authentication outright.
+  TEXT
+end
+
+dmarc = dns_txt("_dmarc.#{FROM_DOMAIN}").grep(/\Av=DMARC1/i)
+if dmarc.empty?
+  warn_check "DMARC record", "No _dmarc.#{FROM_DOMAIN} record."
+elsif !dmarc.first.include?("rua=")
+  warn_check "DMARC reporting", <<~TEXT
+    #{dmarc.first}
+    No rua= address, so nothing reports which of your senders are failing
+    authentication. That is the feedback loop for everything else here.
+  TEXT
+else
+  check("DMARC record") { dmarc.first[0, 70] }
+end
+
+dkim = %w[sl s1 s2 sendlayer default mail].filter_map do |selector|
+  name = "#{selector}._domainkey.#{FROM_DOMAIN}"
+  found = dns_cname(name) + dns_txt(name)
+  selector unless found.empty?
+end
+
+if dkim.empty?
+  warn_check "DKIM record", <<~TEXT
+    No DKIM key found at the selectors this script knows about. If your provider
+    uses another selector this may be a false alarm; confirm in its dashboard
+    that the domain shows as verified.
+  TEXT
+else
+  check("DKIM record") { "selector #{dkim.join(", ")}" }
+end
+
+# --- SendLayer, the API adapter ---------------------------------------------
+
+section "SendLayer API"
+
+configure!(
+  adapter: :sendlayer,
+  settings: sendlayer_settings(API_KEY),
+  streams: {
+    broadcast: BROADCAST_KEY ? {settings: sendlayer_settings(BROADCAST_KEY)} : {settings: {}, shared_identity: true}
+  }
+)
+
+check "plain text send" do
+  result = SparrowMail.deliver!(
+    message(subject: "Your sign-in code", text: "Your sign-in code is 481920.\n\nThis is a delivery test, #{SECRET}.")
+  )
+  expect!(result.success?, "not a success")
+  expect!(result.delivered?, "not delivered")
+  expect!(!result.message_id.nil?, "no provider message id")
+  "id #{result.message_id}"
+end
+
+check "multipart text and html" do
+  result = SparrowMail.deliver!(
+    message(
+      subject: "Welcome to SparrowSoft",
+      text: "Thanks for joining. This is a delivery test, #{SECRET}.",
+      html: "<h1>Thanks for joining</h1><p>This is a delivery test, #{SECRET}.</p>" \
+            "<p><em>Seeing raw markup here means the HTML part did not render.</em></p>"
+    )
+  )
+  expect!(result.success?, "not a success")
+  "id #{result.message_id}"
+end
+
+check "attachment" do
+  result = SparrowMail.deliver!(
+    message(
+      subject: "Your export is ready",
+      text: "Your export is attached. This is a delivery test, #{SECRET}.",
+      attachments: {"export-#{RUN_ID}.csv" => "column,value\nrun,#{RUN_ID}\n"}
+    )
+  )
+  expect!(result.success?, "not a success")
+  "id #{result.message_id}"
+end
+
+check "custom header, tags and metadata" do
+  result = SparrowMail.deliver!(
+    message(
+      subject: "Your monthly summary",
+      text: "Your summary is ready. This is a delivery test, #{SECRET}. " \
+            "Please open the raw source of this message for the checklist below.",
+      headers: {
+        "X-Smoke-Run" => RUN_ID,
+        SparrowMail::Envelope::TAGS_HEADER => "smoke,transactional",
+        SparrowMail::Envelope::METADATA_HEADER => %({"run_id":"#{RUN_ID}"})
+      }
+    )
+  )
+  expect!(result.success?, "not a success")
+  "id #{result.message_id}"
+end
+
+check "utf-8 subject and body" do
+  result = SparrowMail.deliver!(
+    message(
+      subject: "Código de acceso · 確認 · Grüße",
+      text: "Grüße und 確認. This is a delivery test, #{SECRET}."
+    )
+  )
+  expect!(result.success?, "not a success")
+  "id #{result.message_id}"
+end
+
+if BCC
+  check "bcc delivery" do
+    result = SparrowMail.deliver!(
+      message(subject: "Your receipt", text: "Receipt attached to your account. This is a delivery test, #{SECRET}.", bcc: BCC)
+    )
+    expect!(result.recipients == 2, "expected 2 recipients, got #{result.recipients}")
+    "id #{result.message_id}"
+  end
+else
+  skip "bcc delivery", "SMOKE_BCC not set"
+end
+
+check "broadcast stream routes and reports" do
+  result = SparrowMail.deliver!(
+    message(
+      subject: "This week at SparrowSoft",
+      text: "Sent on the broadcast stream. This is a delivery test, #{SECRET}.",
+      headers: {SparrowMail::Envelope::STREAM_HEADER => "broadcast"}
+    )
+  )
+  expect!(result.stream == :broadcast, "stream was #{result.stream.inspect}")
+  "stream #{result.stream}"
+end
+
+# --- the inviolable rules, against real responses ---------------------------
+
+section "Inviolable rules, against real traffic"
+
+check "no body content in any log line" do
+  expect!(!LOG.text.include?(SECRET), "the run marker reached the log")
+  "#{LOG.lines.size} lines checked"
+end
+
+check "no subject in any log line" do
+  expect!(!LOG.text.include?("Código"), "a subject reached the log")
+  expect!(!LOG.text.include?("sign-in code"), "a subject reached the log")
+  nil
+end
+
+check "log lines carry the routing metadata that makes them worth having" do
+  expect!(LOG.text.include?("adapter=sendlayer"), "no adapter in the log")
+  expect!(LOG.text.include?("recipients="), "no recipient count in the log")
+  expect!(LOG.text.include?("stream="), "no stream in the log")
+  nil
+end
+
+# --- failure paths, against real error responses ----------------------------
+
+section "Failure paths, against real error responses"
+
+# These validate the error classification against what the provider actually
+# returns, which no stubbed response can do: a stub only ever confirms the
+# shape we already assumed.
+class << self
+  def failure_class(adapter, mail)
+    adapter.deliver!(mail)
+    nil
+  rescue SparrowMail::DeliveryError => e
+    e
+  end
+end
+
+check "bad credential surfaces as AuthenticationError" do
+  bad = SparrowMail::Adapters::SendLayer.new(sendlayer_settings("#{API_KEY}-definitely-wrong"))
+  error = failure_class(bad, message(subject: "Should not arrive", text: "Bad credential test, #{SECRET}."))
+
+  expect!(!error.nil?, "the send succeeded with a wrong key")
+  expect!(error.is_a?(SparrowMail::AuthenticationError),
+    "got #{error.class} (#{error.category}) with status #{error.status_code}")
+  expect!(!error.message.include?(SECRET), "the error message leaked the body")
+  "status #{error.status_code}"
+end
+
+check "malformed recipient is classified, not left unknown" do
+  adapter = SparrowMail::Adapters::SendLayer.new(sendlayer_settings(API_KEY))
+  error = failure_class(
+    adapter,
+    message(subject: "Should not arrive", text: "Bad recipient test, #{SECRET}.", to: "not-an-address")
+  )
+
+  if error.nil?
+    raise "SendLayer accepted a malformed recipient; nothing to classify"
+  end
+
+  expect!(!error.is_a?(SparrowMail::UnknownError),
+    "classified as UnknownError, which means the mapping missed this case " \
+    "(status #{error.status_code})")
+  expect!(!error.message.include?(SECRET), "the error message leaked the body")
+  "#{error.class.name.split("::").last}, status #{error.status_code}"
+end
+
+check "unreachable endpoint surfaces as NetworkError" do
+  unreachable = SparrowMail::Adapters::SendLayer.new(
+    api_key: API_KEY,
+    base_url: "https://127.0.0.1:9/",
+    open_timeout: 2
+  )
+  error = failure_class(unreachable, message(subject: "Should not arrive", text: "Unreachable endpoint test, #{SECRET}."))
+
+  expect!(error.is_a?(SparrowMail::NetworkError), "got #{error.class}")
+  expect!(error.category == :provider_down, "category was #{error.category.inspect}")
+  nil
+end
+
+check "no body content in the log after every failure path" do
+  expect!(!LOG.text.include?(SECRET), "the run marker reached the log")
+  nil
+end
+
+# --- sandbox ----------------------------------------------------------------
+
+section "Sandbox mode"
+
+check "sandbox sends nothing and records locally" do
+  configure!(adapter: :sendlayer, settings: sendlayer_settings(API_KEY), sandbox: true)
+
+  result = SparrowMail.deliver!(
+    message(subject: "Held in sandbox, must not arrive", text: "This must not arrive. #{SECRET}.")
+  )
+
+  expect!(result.sandbox?, "result not marked sandbox")
+  expect!(!result.delivered?, "sandbox message reported as delivered")
+  expect!(SparrowMail.deliveries.size == 1, "message not recorded locally")
+  "recorded, not sent"
+end
+
+# --- SMTP -------------------------------------------------------------------
+
+section "SMTP adapter"
+
+if SMTP_HOST
+  check "smtp send with a control header, which rebuilds the MIME" do
+    configure!(
+      adapter: :smtp,
+      settings: {
+        address: SMTP_HOST,
+        port: SMTP_PORT ? Integer(SMTP_PORT) : 587,
+        user_name: SMTP_USER,
+        password: SMTP_PASS
+      }.compact
+    )
+
+    result = SparrowMail.deliver!(
+      message(
+        subject: "Your account was updated",
+        text: "Sent over SMTP. This is a delivery test, #{SECRET}.",
+        bcc: BCC,
+        headers: {SparrowMail::Envelope::TAGS_HEADER => "smoke"}
+      )
+    )
+    expect!(result.success?, "not a success")
+    expect!(!LOG.text.include?(SECRET), "the body reached the log")
+    "id #{result.message_id}"
+  end
+else
+  skip "smtp send", "SMOKE_SMTP_HOST not set"
+end
+
+# --- Rails ------------------------------------------------------------------
+
+section "Rails integration"
+
+check "a real Rails app registers and uses the delivery method" do
+  app = Class.new(Rails::Application) do
+    config.eager_load = false
+    config.logger = Logger.new(IO::NULL)
+    config.secret_key_base = "smoke" * 10
+    config.root = File.join(ROOT, "tmp", "smoke-app")
+  end
+  Object.const_set(:SmokeApp, app)
+  FileUtils.mkdir_p(app.config.root)
+  app.initialize!
+
+  expect!(ActionMailer::Base.delivery_methods.key?(:sparrow_mail),
+    "the Railtie did not register :sparrow_mail")
+
+  configure!(adapter: :sendlayer, settings: sendlayer_settings(API_KEY))
+  ActionMailer::Base.delivery_method = :sparrow_mail
+  ActionMailer::Base.raise_delivery_errors = true
+
+  mailer = Class.new(ActionMailer::Base) do
+    def smoke(from:, to:, subject:, body:)
+      mail(from: from, to: to, subject: subject) do |format|
+        format.text { render plain: body }
+      end
+    end
+  end
+  Object.const_set(:SmokeMailer, mailer)
+
+  LOG.clear
+  SmokeMailer.smoke(
+    from: FROM,
+    to: TO,
+    subject: "Your password was changed",
+    body: "Sent through ActionMailer. This is a delivery test, #{SECRET}."
+  ).deliver_now
+
+  # deliver_now returns the Mail::Message, not our Result, so the only evidence
+  # that anything left is the log line the core writes. Asserting on it is the
+  # difference between this check and the one it replaces, which passed happily
+  # while the message sat in sandbox and never reached the provider at all.
+  delivery = LOG.lines.grep(/event=delivery\b/).last
+  expect!(delivery, "no delivery was logged; the message never reached an adapter")
+  expect!(delivery.include?("sandbox=false"),
+    "the message was held in sandbox rather than sent: #{delivery}")
+  expect!(delivery.include?("delivered=true"),
+    "the adapter reported the message as not delivered: #{delivery}")
+  expect!(SparrowMail.deliveries.empty?,
+    "the message was recorded locally instead of sent")
+
+  expect!(!LOG.text.include?(SECRET), "the body reached the log")
+  "delivered, sandbox=false"
+end
+
+# --- summary ----------------------------------------------------------------
+
+require "fileutils"
+
+puts "\n#{BOLD}Summary#{RESET}"
+puts "  #{GREEN}#{RESULTS[:pass]} passed#{RESET}  " \
+     "#{RESULTS[:fail].positive? ? RED : DIM}#{RESULTS[:fail]} failed#{RESET}  " \
+     "#{RESULTS[:warn].positive? ? YELLOW : DIM}#{RESULTS[:warn]} warnings#{RESET}  " \
+     "#{DIM}#{RESULTS[:skip]} skipped#{RESET}"
+
+unless FAILURES.empty?
+  puts "\n#{RED}Failures#{RESET}"
+  FAILURES.each { |f| puts "  - #{f}" }
+end
+
+puts <<~CHECKLIST
+
+  #{BOLD}Now check the inbox at #{TO}#{RESET}
+  #{DIM}Everything above is what the API accepted. These are the things only a
+  received message can settle. Search for "#{RUN_ID}"; every body carries it.#{RESET}
+
+    [ ] 8 messages arrived (7 if SMOKE_BCC is unset)
+    [ ] "Held in sandbox, must not arrive" is NOT among them
+    [ ] "Welcome to SparrowSoft" renders as a heading, not raw markup
+    [ ] "Your export is ready" has export-#{RUN_ID}.csv attached, and it opens
+    [ ] "Código de acceso · 確認 · Grüße" displays correctly in the subject line
+    [ ] "Your receipt" arrived at #{BCC || "(bcc not configured)"} as well
+    [ ] "Your receipt" raw source does NOT list #{BCC || "the bcc address"} in a header
+
+  #{BOLD}In the raw source of any received message#{RESET}
+  #{DIM}Find the Authentication-Results header. It settles in one line whether
+  this is an authentication problem or a reputation one.#{RESET}
+
+    [ ] spf=pass       (or spf=none if you have not added an SPF record yet)
+    [ ] dkim=pass      header.d=#{FROM_DOMAIN}
+    [ ] dmarc=pass
+
+  #{DIM}dkim=pass with header.d set to some other domain is the giveaway that the
+  API key belongs to a different account than #{FROM_DOMAIN}. That fails DMARC
+  alignment on its own, and with no SPF record there is nothing else left to
+  pass on.#{RESET}
+
+  #{BOLD}In the raw source of "Your monthly summary"#{RESET}
+
+    [ ] X-Smoke-Run: #{RUN_ID} is present
+    [ ] X-Sparrow-Tags is ABSENT
+    [ ] X-Sparrow-Metadata is ABSENT
+    [ ] X-Sparrow-Stream is ABSENT
+
+  #{DIM}That last group is the one worth doing carefully. Control-header
+  stripping changed recently, and a received message is the only thing that
+  proves it for the transports that send raw MIME.#{RESET}
+
+CHECKLIST
+
+exit(RESULTS[:fail].zero? ? 0 : 1)
