@@ -45,7 +45,7 @@ silent second attempt, and it is yours to decide what happens next.
 # Not on RubyGems yet, and the four gems pin each other to an exact version, so
 # they all come from the repository in one `git` block. Comment out what you do
 # not want.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.1", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.2", glob: "gems/*/*.gemspec" do
   gem "sparrow_mail"
 end
 ```

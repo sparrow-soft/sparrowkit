@@ -7,6 +7,29 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.0.2 - 2026-08-25
+
+### Fixed
+
+- The install instructions did not work. Every README showed
+  `gem "sparrow_auth"`, which cannot resolve: the gems are not on RubyGems, and
+  they pin each other to an exact version, so Bundler looked on rubygems.org
+  for a version that is not there. All of them now show one `git` block with
+  `glob: "gems/*/*.gemspec"`, which also lets a single module be installed on
+  its own -- `sparrow_pay` alone resolves and locks all three.
+- `sparrow_auth`'s README gave no Gemfile step at all, opening on the rake task.
+- A shipped `config/routes.rb` and a migration comment still described
+  `rails generate sparrowkit:screens` and `SparrowAuth::Role`, both removed.
+
+### Added
+
+- The documentation check reads what the gemspecs package, rather than a list
+  of directories, so a file in a directory nobody thought of is covered the
+  moment it ships. It also verifies the install snippets carry the git source
+  and pin the version being released.
+- The docs record that `sparrowkit:install` comes from `sparrow_ui`, and name
+  the per-module install tasks for anyone not taking the control panel.
+
 ## 1.0.1 - 2026-08-24
 
 ### Fixed

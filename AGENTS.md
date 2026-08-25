@@ -57,7 +57,7 @@ than to whatever `main` holds today:
 
 ```ruby
 # Gemfile
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.1", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.2", glob: "gems/*/*.gemspec" do
   gem "sparrow_auth"
   gem "sparrow_mail"
   gem "sparrow_pay"
