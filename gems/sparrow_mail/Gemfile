@@ -29,5 +29,5 @@ group :development, :test do
   # sparrow_ui is development tooling and is not in a production bundle, which
   # is exactly what the guard in lib/sparrow_mail/railtie.rb relies on.
   gem "sparrow_ui", path: "../sparrow_ui"
-  gem "rspec-rails", "~> 7.0"
+  gem "rspec-rails", "~> 8.0"
 end
