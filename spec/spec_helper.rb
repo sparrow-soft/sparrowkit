@@ -14,14 +14,16 @@ end
 ROOT = File.expand_path("..", __dir__)
 GEMS = %w[sparrow_mail sparrow_auth sparrow_pay sparrow_ui].freeze
 
-# Every line of Ruby SparrowKit ships, as one string. Vendored bundles are
-# somebody else's code and would make every check pass by accident.
+# Every line of Ruby SparrowKit ships, as one string.
+#
+# From the gemspecs, for the same reason shipped_documents is: a hardcoded
+# lib/app/console list is a list that goes stale the first time a gem grows a
+# directory. This one fails in the safe direction -- too narrow means claiming
+# something does not exist when it does -- but there is no reason to keep two
+# answers to the question of what ships.
 def shipped_source
-  @shipped_source ||= GEMS.flat_map { |gem|
-    %w[lib app console].flat_map do |dir|
-      Dir.glob(File.join(ROOT, "gems", gem, dir, "**", "*.rb"))
-    end
-  }.reject { |path| path.include?("/vendor/") }
+  @shipped_source ||= shipped_files
+    .grep(/\.rb\z/)
     .map { |path| read_utf8(path) }
     .join("\n")
 end
@@ -95,12 +97,17 @@ REMOVED_APIS = {
 # asserts an API is gone has to name it, and would otherwise flag itself.
 TEXT_FILE = /\.(rb|erb|tt|md)\z/
 
-def shipped_documents
-  @shipped_documents ||= GEMS.flat_map { |gem|
+# Every text file the four gems package, straight from their gemspecs.
+def shipped_files
+  @shipped_files ||= GEMS.flat_map do |gem|
     dir = File.join(ROOT, "gems", gem)
     spec = Dir.chdir(dir) { Gem::Specification.load("#{gem}.gemspec") }
     raise "could not load #{gem}.gemspec" if spec.nil?
 
     spec.files.grep(TEXT_FILE).map { |relative| File.join(dir, relative) }
-  } + Dir.glob(File.join(ROOT, "*.md"))
+  end
+end
+
+def shipped_documents
+  shipped_files + Dir.glob(File.join(ROOT, "*.md"))
 end
