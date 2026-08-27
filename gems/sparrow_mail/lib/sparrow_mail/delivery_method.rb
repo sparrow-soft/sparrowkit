@@ -16,11 +16,17 @@ module SparrowMail
   #     api_key: ENV["POSTMARK_SERVER_TOKEN"]
   #   }
   #
-  # A note on `deliver_later`. ActiveJob retries failed jobs by default, and a
-  # retried job re-runs the whole mailer, which sends the message again. This
-  # gem cannot prevent that — it never sees the job — so an application queueing
-  # transactional mail should configure the job class not to retry delivery
-  # failures. The README covers it under "deliver_later and retries".
+  # A note on `deliver_later`. A retried job re-runs the whole mailer, which
+  # sends the message again — this gem cannot prevent that, since it never
+  # sees the job. Whether that happens depends on the job class, not on this
+  # gem: the default, ActionMailer::MailDeliveryJob, declares no retries of
+  # its own, so with most queue backends one attempt is genuinely one
+  # attempt. (Some backends, Sidekiq among them, retry a failed job on their
+  # own regardless of what ActiveJob declares — that is between the
+  # application and its queue backend, and out of reach from here either
+  # way.) RetryableDeliveryJob is the opt-in for mail where a retry is worth
+  # the risk of a duplicate. The README covers it under "Retrying through
+  # deliver_later".
   class DeliveryMethod
     attr_reader :settings
 

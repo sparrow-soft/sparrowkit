@@ -9,6 +9,17 @@ module SparrowMail
     #   config.adapter  = :postmark
     #   config.settings = {api_key: ENV["POSTMARK_SERVER_TOKEN"]}
     #
+    # `api_key` is Postmark's *Server* API token — the only credential
+    # sending needs, sent as `X-Postmark-Server-Token`. Postmark also issues
+    # an *Account* API token, for account-level calls (managing servers,
+    # domains, templates) that this adapter does not make. An optional
+    # `account_token` setting is accepted and preserved, reserved for such
+    # operations if this gem adds them later — same treatment the SES
+    # adapter gives `access_key_id`/`secret_access_key`: not in
+    # `required_settings`, so it is never required and never rendered as a
+    # field in the control panel. Set it by hand in credentials or an
+    # initializer.
+    #
     # Sandbox mode swaps in Postmark's documented test token, which makes the
     # API validate the message fully and deliver nothing. That is a real
     # provider sandbox, so the request is still made and the whole path is

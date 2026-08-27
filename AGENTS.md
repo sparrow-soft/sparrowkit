@@ -286,6 +286,22 @@ end
 `success?` and `delivered?` differ: a message withheld in sandbox mode is a
 success that was not delivered.
 
+A send is never retried — the adapter is called exactly once, so a timeout
+can never turn into a duplicate sign-in code. `deliver_later` is a separate
+layer: the default job makes one attempt too, and a mailer opts into retrying
+by naming a different job:
+
+```ruby
+class NewsletterMailer < ApplicationMailer
+  self.delivery_job = SparrowMail::RetryableDeliveryJob
+end
+```
+
+It retries only `RateLimitError`, `ProviderError` and `NetworkError` — never
+`AuthenticationError` or `InvalidRecipientError`, where sending again cannot
+help. Reach for this on mail where a duplicate is an acceptable risk, not on
+anything transactional.
+
 Adapters: `mailgun`, `postmark`, `sendgrid`, `ses`, `smtp`, `send_layer`,
 `preview`, `test`. Choose one in the control panel or in credentials; swapping
 providers changes one setting and nothing else.
