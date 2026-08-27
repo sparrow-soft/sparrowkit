@@ -37,7 +37,7 @@ renew — you ask Pay.
 # Not on RubyGems yet, and the four gems pin each other to an exact version, so
 # they all come from the repository in one `git` block. Comment out what you do
 # not want.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.2", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.1.0", glob: "gems/*/*.gemspec" do
   gem "sparrow_auth"
   gem "sparrow_pay"
 end
