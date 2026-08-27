@@ -25,6 +25,14 @@ RSpec.describe SparrowMail::Adapters::Postmark do
       expect(driver.last_headers["X-Postmark-Server-Token"]).to eq("postmark-conformance-token")
     end
 
+    it "tolerates an optional account_token setting without requiring or sending it" do
+      adapter = described_class.new(driver.settings.merge(account_token: "postmark-account-token"))
+      adapter.deliver!(SparrowMail::Conformance.build_message)
+
+      expect(driver.last_headers["X-Postmark-Server-Token"]).to eq("postmark-conformance-token")
+      expect(driver.last_headers).not_to have_key("X-Postmark-Account-Token")
+    end
+
     it "sends recipients as comma-separated strings, which is Postmark's format" do
       payload = deliver(to: ["one@example.org", "Two <two@example.org>"])
 

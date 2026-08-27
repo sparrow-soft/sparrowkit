@@ -7,6 +7,33 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.1.0 - 2026-08-27
+
+### Added
+
+- `SparrowMail::RetryableDeliveryJob`, an opt-in `ActionMailer::MailDeliveryJob`
+  for mail sent through `deliver_later` where a retried duplicate is an
+  acceptable risk. It retries `RateLimitError`, `ProviderError` and
+  `NetworkError` -- the categories where sending again has a chance of
+  working -- and leaves `AuthenticationError` and `InvalidRecipientError`
+  alone, since retrying either only delays a failure that was never going to
+  resolve. A mailer opts in with `self.delivery_job =
+  SparrowMail::RetryableDeliveryJob`; the gem's own send stays exactly as
+  retry-free as it always was.
+- The Postmark adapter now documents and accepts an optional `account_token`
+  setting, reserved for account-level Postmark operations this gem does not
+  yet make. It is not required and does not appear in the control panel --
+  the same treatment the SES adapter already gives `access_key_id` and
+  `secret_access_key`.
+
+### Fixed
+
+- `SparrowMail::DeliveryMethod`'s doc comment claimed ActiveJob retries
+  failed jobs by default and pointed at a README section, "deliver_later and
+  retries", that did not exist. Neither was true: retrying depends on the
+  queue backend, and the section is now written, under "Retrying through
+  deliver_later".
+
 ## 1.0.2 - 2026-08-25
 
 ### Fixed

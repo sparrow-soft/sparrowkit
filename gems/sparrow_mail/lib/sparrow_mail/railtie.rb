@@ -77,6 +77,11 @@ module SparrowMail
           SparrowMail::Railtie::DELIVERY_METHOD,
           SparrowMail::DeliveryMethod
         )
+
+        # RetryableDeliveryJob subclasses ActionMailer::MailDeliveryJob, so it
+        # cannot be required until ActionMailer is -- this hook is the first
+        # point that is guaranteed true.
+        require "sparrow_mail/retryable_delivery_job"
       end
     end
 

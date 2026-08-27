@@ -32,7 +32,9 @@ providers routinely quote the message they rejected back at you.
 
 **A send is never retried.** A send that timed out may well have arrived.
 Sending it again puts a second copy of a one-time code in somebody's inbox and
-invalidates the first. The adapter is called exactly once.
+invalidates the first. The adapter is called exactly once. This governs the
+gem's own send; `deliver_later` is a different layer, covered below under
+"Retrying through deliver_later".
 
 Both matter to you when something fails: you will get an error rather than a
 silent second attempt, and it is yours to decide what happens next.
@@ -45,7 +47,7 @@ silent second attempt, and it is yours to decide what happens next.
 # Not on RubyGems yet, and the four gems pin each other to an exact version, so
 # they all come from the repository in one `git` block. Comment out what you do
 # not want.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.0.2", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.1.0", glob: "gems/*/*.gemspec" do
   gem "sparrow_mail"
 end
 ```
@@ -182,6 +184,30 @@ end
 Postmark and Amazon SES separate the two themselves and need no configuration.
 Providers that have no such notion need a different sending identity instead — a
 different domain, account, or provider — which is one line of configuration.
+
+## Retrying through deliver_later
+
+The gem's own send is never retried (see above), but `deliver_later` is a
+different layer: retrying there is ActiveJob's decision, driven by whichever
+job class a mailer's `delivery_job` names. The default,
+`ActionMailer::MailDeliveryJob`, declares none — so out of the box, queueing
+mail through this gem is still one attempt, just deferred to a worker.
+
+For mail where a retry is worth the risk of a duplicate — a newsletter, not a
+sign-in code — opt a mailer in:
+
+```ruby
+class NewsletterMailer < ApplicationMailer
+  self.delivery_job = SparrowMail::RetryableDeliveryJob
+end
+```
+
+It retries `RateLimitError`, `ProviderError` and `NetworkError` — the
+categories where sending again has a chance of working — and leaves
+`AuthenticationError` and `InvalidRecipientError` alone: sending the same bad
+credential or the same rejected address again changes nothing, so retrying
+those would only delay a failure that was never going to resolve. Leave a
+mailer's `delivery_job` unset and nothing changes for it.
 
 ## Testing your own application
 
