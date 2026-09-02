@@ -42,7 +42,7 @@ RSpec.describe "sending a test email from the panel", type: :request do
     expect(flash[:notice]).to match(/test/i)
   end
 
-  it "sends on the transactional stream, never the marketing one" do
+  it "sends on the transactional stream, never the broadcast one" do
     # Auth mail rides the transactional reputation (rule 7), and so does the
     # message that tests it.
     configure_mail

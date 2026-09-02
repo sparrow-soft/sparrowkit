@@ -179,8 +179,8 @@ module SparrowUi
       #
       # A `nil` REMOVES the key, subtree and all. Merging can only ever add,
       # and a panel needs to be able to say that a section has gone -- the mail
-      # panel that stops sending marketing through a second provider has to
-      # take `marketing:` back out, and leaving it behind would leave a stream
+      # panel that stops sending broadcast mail through a second provider has to
+      # take `broadcast:` back out, and leaving it behind would leave a stream
       # configured that nobody meant to keep.
       def write(gem_key, attributes)
         raise NotWritable, not_writable_reason unless writable?
@@ -193,6 +193,35 @@ module SparrowUi
         forget!
 
         merged
+      end
+
+      # Moves one subtree of a module's settings to another key, secrets and
+      # all, and persists. Nothing when `from` is absent; when `to` is already
+      # there, `from` is simply removed, because the current name is the one
+      # that is being kept up to date and the old one is stale beside it.
+      #
+      # Exists because a panel cannot do this through `write`: the panel only
+      # ever sees secrets masked, so writing what it has under the new key
+      # would carry across everything except the API key. The value never
+      # leaves this module.
+      #
+      # Returns true when the file changed.
+      def move(gem_key, from:, to:)
+        raise NotWritable, not_writable_reason unless writable?
+
+        tree = read(gem_key)
+        return false unless tree.key?(from.to_sym)
+
+        moved = tree.dup
+        value = moved.delete(from.to_sym)
+        moved[to.to_sym] = value unless moved.key?(to.to_sym)
+
+        data = credentials.config.deep_dup
+        data[gem_key.to_sym] = moved
+        credentials.write(deep_stringify(data).to_yaml)
+        forget!
+
+        true
       end
 
       # Drops Rails' memoised credentials object so the next read decrypts the

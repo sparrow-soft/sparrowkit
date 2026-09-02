@@ -124,7 +124,7 @@ RSpec.describe "the mail control panel", type: :request do
       }
 
       expect(stored[:transactional]).to include(adapter: "postmark", api_key: "pm-0001")
-      expect(stored[:marketing]).to include(adapter: "mailgun", api_key: "mg-0001")
+      expect(stored[:broadcast]).to include(adapter: "mailgun", api_key: "mg-0001")
     end
   end
 
@@ -229,8 +229,8 @@ RSpec.describe "the mail control panel", type: :request do
   end
 
   describe "one provider for both kinds of mail" do
-    it "writes one adapter and no marketing stream at all" do
-      # Not a marketing stream that happens to match. NO marketing stream:
+    it "writes one adapter and no broadcast stream at all" do
+      # Not a broadcast stream that happens to match. NO broadcast stream:
       # nothing for SparrowMail's verify_separation! to weigh up, and nothing
       # to keep in step.
       patch PANEL, params: {
@@ -245,7 +245,7 @@ RSpec.describe "the mail control panel", type: :request do
         adapter: "mailgun", api_key: "mg-0001", domain: "mail.acme.test"
       )
       expect(stored[:default_from]).to eq("Acme <hello@acme.test>")
-      expect(stored).not_to have_key(:marketing)
+      expect(stored).not_to have_key(:broadcast)
     end
 
     it "ignores the second card entirely" do
@@ -256,15 +256,15 @@ RSpec.describe "the mail control panel", type: :request do
         secondary: {adapter: "mailgun", settings: {mailgun: {api_key: "mg-0001", domain: "news.acme.test"}}}
       }
 
-      expect(stored).not_to have_key(:marketing)
+      expect(stored).not_to have_key(:broadcast)
     end
 
-    it "takes a marketing stream back out when it is no longer wanted" do
-      # A merge can only ever add. Leaving `marketing:` behind would leave a
+    it "takes a broadcast stream back out when it is no longer wanted" do
+      # A merge can only ever add. Leaving `broadcast:` behind would leave a
       # second provider configured that nobody meant to keep sending through.
       ConsoleCredentials.reset!(sparrow_mail: {
         transactional: {adapter: "postmark", api_key: "pm-9876"},
-        marketing: {adapter: "mailgun", api_key: "mg-9876", domain: "news.acme.test"}
+        broadcast: {adapter: "mailgun", api_key: "mg-9876", domain: "news.acme.test"}
       })
 
       patch PANEL, params: {
@@ -273,13 +273,61 @@ RSpec.describe "the mail control panel", type: :request do
         primary: {adapter: "postmark", settings: {postmark: {api_key: ""}}}
       }
 
-      expect(stored).not_to have_key(:marketing)
+      expect(stored).not_to have_key(:broadcast)
       expect(stored[:transactional][:api_key]).to eq("pm-9876")
     end
   end
 
+  # The second stream was stored as `marketing:` before 1.3.0, while the
+  # README, Postmark and the conformance suite all said `broadcast`. The
+  # panel reads the old key as the new one and takes it out on the next
+  # save, so a second provider configured before the rename is neither lost
+  # nor left behind under a name nothing sends on.
+  describe "a second provider stored under the panel's old name for it" do
+    before do
+      ConsoleCredentials.reset!(sparrow_mail: {
+        transactional: {adapter: "postmark", api_key: "pm-9876"},
+        marketing: {adapter: "mailgun", api_key: "mg-9876", domain: "news.acme.test"}
+      })
+    end
+
+    it "shows it as the broadcast provider, selected and prefilled" do
+      get PANEL
+
+      expect(response.body).to include(%(id="mail_handles_transactional"
+                   name="handles"
+                   value="transactional"))
+      expect(response.body).to match(/id="mail_secondary_adapter".*?<option value="mailgun"[^>]*selected/m)
+      expect(response.body).to match(/id="mail_secondary_mailgun_domain".*?value="news\.acme\.test"/m)
+    end
+
+    it "renames it on the next save, keeping what it held" do
+      patch PANEL, params: {
+        handles: "transactional",
+        sender_name: "", sender_email: "",
+        primary: {adapter: "postmark", settings: {postmark: {api_key: ""}}},
+        secondary: {adapter: "mailgun", settings: {mailgun: {api_key: "", domain: "news.acme.test"}}}
+      }
+
+      expect(stored).not_to have_key(:marketing)
+      expect(stored[:broadcast]).to eq(adapter: "mailgun", api_key: "mg-9876", domain: "news.acme.test")
+      expect(stored[:transactional]).to eq(adapter: "postmark", api_key: "pm-9876")
+    end
+
+    it "takes it out when one provider is chosen for everything" do
+      patch PANEL, params: {
+        handles: "both",
+        sender_name: "", sender_email: "",
+        primary: {adapter: "postmark", settings: {postmark: {api_key: ""}}}
+      }
+
+      expect(stored).not_to have_key(:marketing)
+      expect(stored).not_to have_key(:broadcast)
+    end
+  end
+
   describe "a provider for each kind of mail" do
-    it "gives the marketing stream its own adapter and its own settings" do
+    it "gives the broadcast stream its own adapter and its own settings" do
       patch PANEL, params: {
         handles: "transactional",
         sender_name: "", sender_email: "hello@acme.test",
@@ -289,23 +337,23 @@ RSpec.describe "the mail control panel", type: :request do
 
       expect(response).to have_http_status(:found)
       expect(stored[:transactional]).to eq(adapter: "postmark", api_key: "pm-0001")
-      expect(stored[:marketing]).to eq(
+      expect(stored[:broadcast]).to eq(
         adapter: "mailgun", api_key: "mg-0001", domain: "news.acme.test"
       )
     end
 
-    it "reads the cards the other way round when the first handles marketing" do
+    it "reads the cards the other way round when the first handles broadcast" do
       # The same configuration, typed from whichever provider the developer
       # already had. What is stored has no notion of a first card.
       patch PANEL, params: {
-        handles: "marketing",
+        handles: "broadcast",
         sender_name: "", sender_email: "",
         primary: {adapter: "mailgun", settings: {mailgun: {api_key: "mg-0001", domain: "news.acme.test"}}},
         secondary: {adapter: "postmark", settings: {postmark: {api_key: "pm-0001"}}}
       }
 
       expect(stored[:transactional]).to eq(adapter: "postmark", api_key: "pm-0001")
-      expect(stored[:marketing]).to eq(
+      expect(stored[:broadcast]).to eq(
         adapter: "mailgun", api_key: "mg-0001", domain: "news.acme.test"
       )
     end
@@ -323,7 +371,7 @@ RSpec.describe "the mail control panel", type: :request do
 
       expect(stored[:transactional]).not_to have_key(:domain)
       expect(stored[:transactional][:api_key]).to eq("pm-0001")
-      expect(stored[:marketing][:api_key]).to eq("mg-0001")
+      expect(stored[:broadcast][:api_key]).to eq("mg-0001")
     end
 
     it "writes nothing belonging to a provider that was not chosen" do
@@ -394,7 +442,7 @@ RSpec.describe "the mail control panel", type: :request do
       # level would hand `transactional:` to the view whole, key and all.
       ConsoleCredentials.reset!(sparrow_mail: {
         transactional: {adapter: "postmark", api_key: "pm-live-do-not-print-9876"},
-        marketing: {adapter: "mailgun", api_key: "mg-live-do-not-print-5432", domain: "news.acme.test"}
+        broadcast: {adapter: "mailgun", api_key: "mg-live-do-not-print-5432", domain: "news.acme.test"}
       })
 
       get PANEL
@@ -436,7 +484,7 @@ RSpec.describe "the mail control panel", type: :request do
     it "keeps a blank secret in EITHER card" do
       ConsoleCredentials.reset!(sparrow_mail: {
         transactional: {adapter: "postmark", api_key: "pm-live-9876"},
-        marketing: {adapter: "mailgun", api_key: "mg-live-5432", domain: "news.acme.test"}
+        broadcast: {adapter: "mailgun", api_key: "mg-live-5432", domain: "news.acme.test"}
       })
 
       patch PANEL, params: {
@@ -447,7 +495,7 @@ RSpec.describe "the mail control panel", type: :request do
       }
 
       expect(stored[:transactional][:api_key]).to eq("pm-live-9876")
-      expect(stored[:marketing][:api_key]).to eq("mg-live-5432")
+      expect(stored[:broadcast][:api_key]).to eq("mg-live-5432")
     end
 
     it "replaces the stored secret when a new one is typed" do
@@ -510,7 +558,7 @@ RSpec.describe "the mail control panel", type: :request do
       patch PANEL, params: same_provider
 
       expect(response).to have_http_status(:found)
-      expect(stored[:marketing]).to eq(adapter: "postmark", api_key: "pm-0002")
+      expect(stored[:broadcast]).to eq(adapter: "postmark", api_key: "pm-0002")
       expect(flash[:alert]).to include("keeps one reputation for both")
       expect(flash[:alert]).to include("API key")
     end
@@ -913,7 +961,7 @@ RSpec.describe "the mail control panel", type: :request do
       SparrowMail.reset!
     end
 
-    it "gives the marketing stream its own provider, the way the panel split them" do
+    it "gives the broadcast stream its own provider, the way the panel split them" do
       patch PANEL, params: {
         handles: "transactional",
         sender_name: "Acme", sender_email: "hello@acme.test",
@@ -924,8 +972,8 @@ RSpec.describe "the mail control panel", type: :request do
       SparrowMail.reset!
       SparrowMail.apply_credentials!
 
-      expect(SparrowMail.configuration.adapter_for_stream(:marketing)).to eq(:mailgun)
-      expect(SparrowMail.configuration.adapter_settings_for(:marketing)).to include(api_key: "mg-live-5678")
+      expect(SparrowMail.configuration.adapter_for_stream(:broadcast)).to eq(:mailgun)
+      expect(SparrowMail.configuration.adapter_settings_for(:broadcast)).to include(api_key: "mg-live-5678")
     ensure
       SparrowMail.reset!
     end

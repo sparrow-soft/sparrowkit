@@ -13,11 +13,11 @@ module SparrowMail
     #   * the default adapter and its settings, which carry the transactional
     #     stream -- Envelope::DEFAULT_STREAM, what mail with no stream header
     #     uses; and
-    #   * `config.stream :marketing, adapter: ..., settings: {...}`, a second
+    #   * `config.stream :broadcast, adapter: ..., settings: {...}`, a second
     #     provider with credentials of its own for bulk mail.
     #
-    # So "one provider handles both" is not a marketing stream that happens to
-    # match. It is NO marketing stream: nothing declared, nothing for
+    # So "one provider handles both" is not a broadcast stream that happens to
+    # match. It is NO broadcast stream: nothing declared, nothing for
     # SparrowMail's verify_separation! to weigh up, nothing to keep in step.
     # That is genuinely the simple case, and it is stored as one.
     #
@@ -45,19 +45,26 @@ module SparrowMail
       # Named from the gem rather than restated. A rename there has to reach
       # this panel, and a copy would let it not.
       TRANSACTIONAL = SparrowMail::Envelope::DEFAULT_STREAM
-      MARKETING = :marketing
+
+      # The second stream's name is the one the rest of sparrow_mail already
+      # used -- the README's header example, Postmark's built-in stream, the
+      # conformance suite -- and not a word of this panel's own. It was, once,
+      # and the library refused the README's header as an unknown stream on
+      # every application the panel had configured. See
+      # SparrowMail::CREDENTIALS_STREAM_ALIASES for how an old key is read.
+      BROADCAST = :broadcast
 
       # What the first card's provider handles.
       #
-      # "only transactional" and "only marketing" say the same thing in
+      # "only transactional" and "only broadcast" say the same thing in
       # different words -- one provider each way round -- and both are offered
       # because a developer's starting point is whichever provider they already
       # have. What gets stored is the same either way: a transactional stream
-      # and a marketing stream. The panel keeps no record of which card they
+      # and a broadcast stream. The panel keeps no record of which card they
       # were typed into, because sparrow_mail has no such notion and a second
       # answer to "which one is primary" could only ever contradict the first.
       BOTH = "both"
-      HANDLES = [BOTH, TRANSACTIONAL.to_s, MARKETING.to_s].freeze
+      HANDLES = [BOTH, TRANSACTIONAL.to_s, BROADCAST.to_s].freeze
 
       # Both cards are on the page whatever is chosen -- see the view -- and
       # the second is read only when the first provider handles one kind.
@@ -94,6 +101,16 @@ module SparrowMail
           end
 
           chosen[stream] = [card, choice]
+        end
+
+        # A stream stored under a name this panel no longer writes is moved
+        # to its current name first, at the settings layer, because only that
+        # layer holds the real key inside it -- this controller sees secrets
+        # masked, and writing what it has under the new name would carry
+        # across everything except the one value that matters. The write
+        # below then merges into, or removes, the moved subtree as usual.
+        SparrowMail::CREDENTIALS_STREAM_ALIASES.each do |old, current|
+          settings.move(MODULE_KEY, from: old, to: current)
         end
 
         settings.write(MODULE_KEY, attributes_for(chosen))
@@ -225,7 +242,20 @@ module SparrowMail
       # like a secret, at every depth. Nothing else in this controller reads
       # credentials, so there is no path by which a stored key reaches a view.
       def stored_tree
-        @stored_tree ||= settings.for_display(MODULE_KEY)
+        @stored_tree ||= rename_old_streams(settings.for_display(MODULE_KEY))
+      end
+
+      # A stream stored under a name this panel no longer writes, shown under
+      # the name it writes now -- so a second provider configured before the
+      # rename is still on the page, still selected, still prefilled. The
+      # stored key itself is moved on the next save; see update.
+      def rename_old_streams(tree)
+        SparrowMail::CREDENTIALS_STREAM_ALIASES.each_with_object(tree.dup) do |(old, current), out|
+          next unless out.key?(old)
+
+          out[current] = out.delete(old) unless out.key?(current)
+          out.delete(old)
+        end
       end
 
       # What is in the folder mail goes to while no provider is chosen.
@@ -294,19 +324,19 @@ module SparrowMail
       def streams
         case submitted_handles
         when BOTH then {TRANSACTIONAL => :primary}
-        when MARKETING.to_s then {MARKETING => :primary, TRANSACTIONAL => :secondary}
-        else {TRANSACTIONAL => :primary, MARKETING => :secondary}
+        when BROADCAST.to_s then {BROADCAST => :primary, TRANSACTIONAL => :secondary}
+        else {TRANSACTIONAL => :primary, BROADCAST => :secondary}
         end
       end
 
-      # Submitted, or read back off what is stored: a marketing stream means
+      # Submitted, or read back off what is stored: a broadcast stream means
       # two providers were configured, and its absence means one handles
       # everything.
       def submitted_handles
         submitted = params[:handles].to_s
         return submitted unless submitted.empty?
 
-        stored_tree[MARKETING].is_a?(Hash) ? TRANSACTIONAL.to_s : BOTH
+        stored_tree[BROADCAST].is_a?(Hash) ? TRANSACTIONAL.to_s : BOTH
       end
 
       def selected_adapter(card)
@@ -371,10 +401,10 @@ module SparrowMail
           attributes[stream] = stream_attributes(card, choice, stored.is_a?(Hash) ? stored : {})
         end
 
-        # One provider for everything means no marketing stream at all. nil
+        # One provider for everything means no broadcast stream at all. nil
         # takes the section back out rather than leaving a stream declared that
         # nobody meant to keep.
-        attributes[MARKETING] = nil unless chosen.key?(MARKETING)
+        attributes[BROADCAST] = nil unless chosen.key?(BROADCAST)
 
         attributes
       end

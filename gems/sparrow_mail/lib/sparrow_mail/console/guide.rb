@@ -5,8 +5,8 @@ module SparrowMail
     # What to do with sparrow_mail once it is configured.
     #
     # Built from what is actually stored. "Configure a provider" helps nobody;
-    # "transactional mail goes through Postmark, marketing through Mailgun, so
-    # set `stream: :marketing` on bulk mail" produces code that fits this
+    # "transactional mail goes through Postmark, broadcast through Mailgun, so
+    # set the stream header on bulk mail" produces code that fits this
     # application.
     #
     # NO SECRETS. This text is written to be pasted into somebody else's chat
@@ -34,7 +34,7 @@ module SparrowMail
       def steps
         [
           "# Any ordinary mailer sends through the configured provider\nUserMailer.welcome(account).deliver_later",
-          marketing? ? "# Bulk mail goes on its own stream, with its own reputation\nmail(to: ..., subject: ..., stream: :marketing)" : nil,
+          broadcast? ? "# Bulk mail goes on its own stream, with its own reputation\nheaders[\"X-Sparrow-Stream\"] = \"broadcast\"\nmail(to: ..., subject: ...)" : nil,
           "# In tests and sandbox mode, messages land here instead\nSparrowMail.deliveries"
         ].compact
       end
@@ -49,17 +49,19 @@ module SparrowMail
 
           Configuration in this app right now:
           - Transactional provider: #{provider_for(:transactional)}
-          - Marketing provider: #{marketing? ? provider_for(marketing_stream) : "none -- one provider handles both kinds"}
+          - Broadcast provider: #{broadcast? ? provider_for(broadcast_stream) : "none -- one provider handles both kinds"}
           - Default sender: #{stored[:default_from].presence || "not set"}
 
           What you get:
           - `config.action_mailer.delivery_method = :sparrow_mail`, then every
             mailer in the app sends through the provider above.
           - Two kinds of mail are kept apart. TRANSACTIONAL is anything somebody
-            is waiting for -- sign-in codes, receipts, password resets. MARKETING
-            is anything bulk. #{marketing? ? "They go through different providers here, so a spam complaint about a newsletter cannot damage the reputation that delivers sign-in codes." : "One provider handles both here."}
-          - Put bulk mail on the marketing stream with `stream: :marketing` in
-            the `mail` call. Anything without a stream is transactional.
+            is waiting for -- sign-in codes, receipts, password resets. BROADCAST
+            is anything bulk. #{broadcast? ? "They go through different providers here, so a spam complaint about a newsletter cannot damage the reputation that delivers sign-in codes." : "One provider handles both here."}
+          - Put bulk mail on the broadcast stream by setting
+            `headers["X-Sparrow-Stream"] = "broadcast"` in the mailer method,
+            before the `mail` call. Anything without that header is
+            transactional. There is no `stream:` option on `mail`.
           - `SparrowMail.deliveries` collects messages in test and sandbox modes.
 
           Settings live in Rails encrypted credentials under `sparrow_mail:`.
@@ -75,11 +77,13 @@ module SparrowMail
 
       private
 
-      # Every stream stored, other than the transactional one, is a marketing
+      # Every stream stored, other than the transactional one, is a broadcast
       # stream by construction -- the panel writes exactly one, and a host that
-      # declared others in an initializer is past needing this paragraph.
-      def marketing_stream
-        @marketing_stream ||= stored.keys.map(&:to_sym).find do |name|
+      # declared others in an initializer is past needing this paragraph. That
+      # includes one stored under the panel's old name for it, which is why
+      # this looks for any other Hash rather than for `broadcast` by name.
+      def broadcast_stream
+        @broadcast_stream ||= stored.keys.map(&:to_sym).find do |name|
           next false if name == :transactional
           next false if SparrowMail::CREDENTIALS_SCALARS.include?(name)
 
@@ -87,7 +91,7 @@ module SparrowMail
         end
       end
 
-      def marketing? = !marketing_stream.nil?
+      def broadcast? = !broadcast_stream.nil?
 
       def provider_for(stream)
         adapter = stored.dig(stream, :adapter)

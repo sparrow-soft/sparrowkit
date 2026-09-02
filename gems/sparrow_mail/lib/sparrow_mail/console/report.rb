@@ -254,7 +254,7 @@ module SparrowMail
       # Credentials belong to the provider that issued them, so a stream naming a
       # different adapter starts from nothing and must say what it needs. A
       # stream that forgot has no secret in its settings at all and will fail to
-      # authenticate the first time it sends — which for a marketing stream might
+      # authenticate the first time it sends — which for a broadcast stream might
       # be a month after it was configured.
       def streams_without_credentials
         config.streams.filter_map { |stream|

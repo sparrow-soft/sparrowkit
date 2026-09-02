@@ -36,6 +36,13 @@ module RetiredWords
     "capability" => "Say `permission` for a `resource:action` name, and `role` " \
                     "for the named set of permissions somebody holds.",
 
+    # The second mail stream. The panel called it this while the README,
+    # Postmark and the conformance suite called it `broadcast`, and the
+    # library refused the README's header as an unknown stream on every
+    # application the panel had configured. One word now, everywhere.
+    "marketing" => "Say `broadcast` for the second mail stream: bulk mail, " \
+      "newsletters, anything sent to a list. See SparrowMail::CREDENTIALS_STREAM_ALIASES.",
+
     "role_ladder" => "There is no ladder. A role is a set of permissions, and " \
                      "one role reaches another when it holds everything that " \
                      "one holds -- see SparrowAuth::Role#includes?.",
@@ -107,6 +114,11 @@ module RetiredWords
 
   ALLOWED = [
     "gems/sparrow_auth/spec/console/guide_api_spec.rb",
+    # The old stream key has to be named by the code that still reads it and
+    # by the specs that prove it is read.
+    "gems/sparrow_mail/lib/sparrow_mail.rb",
+    "gems/sparrow_mail/spec/sparrow_mail/credentials_spec.rb",
+    "gems/sparrow_mail/spec/requests/console/sparrowkit_spec.rb",
     "rakelib/vocabulary.rake",
     "plan.md"
   ].freeze

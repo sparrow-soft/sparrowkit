@@ -7,6 +7,27 @@ released in lockstep at one version.
 
 ## Unreleased
 
+### Changed
+
+- The control panel's second mail stream is `broadcast`, which is what the
+  sparrow_mail README, the Postmark adapter and the conformance suite already
+  called it. The panel wrote `marketing:` to credentials, so a developer who
+  configured two providers there and then set the header the README showed
+  them got "unknown stream :broadcast" from the fail-closed stream lookup. A
+  `marketing:` key already in credentials is read as the broadcast stream and
+  rewritten under its new name the next time the Mail panel is saved.
+- The panel's guide for agents no longer tells them to pass `stream:` to the
+  `mail` call, which set a header nothing read. It shows the
+  `X-Sparrow-Stream` header instead, as the README does.
+
+### Added
+
+- `SparrowUi::Console::Settings.move`, which moves one subtree of a module's
+  settings to another key with its secrets intact. A panel only ever sees
+  secrets masked, so it could not rename a section through `write` without
+  losing the API key inside it. The mail panel uses it to carry an old
+  `marketing:` key across to `broadcast:`.
+
 ## 1.2.0 - 2026-09-02
 
 ### Added
