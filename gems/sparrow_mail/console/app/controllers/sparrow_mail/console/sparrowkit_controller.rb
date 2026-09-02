@@ -144,24 +144,21 @@ module SparrowMail
         redirect_to root_path, notice: "The mailbox is empty."
       end
 
+      # One message per stream asked for. With one provider that is the
+      # transactional stream and nothing else is offered; with two, the page
+      # offers transactional, broadcast, or both -- and both is the default,
+      # because two providers raise two questions and a test that answers
+      # one of them leaves the newsletter path unproven until the first
+      # newsletter.
+      #
+      # Each send is its own result. A broadcast that fails beside a
+      # transactional that succeeds is reported as exactly that: one line in
+      # the notice, one in the alert, each naming its stream and provider.
       def test_send
         configuration = SparrowMail.configuration
 
         if configuration.adapter.nil?
           return redirect_to root_path, alert: "Choose a provider and save it before sending a test."
-        end
-
-        # The preview adapter would happily "succeed" here by writing a file,
-        # and this is the one button on the console that must never do that.
-        # Its entire job is answering "do my credentials work?", and Phase 4
-        # already had to stop it answering yes having reached no network -- back
-        # then because :test was offered in the dropdown. Selecting :preview by
-        # default in development reopened exactly that hole from the other side.
-        if configuration.adapter.to_sym == Report::FALLBACK_ADAPTER
-          return redirect_to root_path,
-            alert: "There is no provider to test yet — mail is being written to " \
-                   "#{SparrowMail::Adapters::Preview::DIRECTORY} instead of sent. " \
-                   "Choose one above, save it, and then send a test."
         end
 
         if configuration.default_from.nil?
@@ -173,33 +170,70 @@ module SparrowMail
           return redirect_to root_path, alert: "Type the address the test should go to."
         end
 
-        # A held button or a double-click must not spend sending reputation.
-        # Rails.cache rather than the session, so two browser tabs share one
-        # clock. Dev-only page, dev-sized window.
-        if Rails.cache.read(COOLDOWN_KEY)
-          return redirect_to root_path, alert: "A test email just went out. Give it a moment before sending another."
+        streams = requested_test_streams
+        if streams.nil?
+          return redirect_to root_path,
+            alert: "#{params[:stream].inspect} is not a stream this application sends on. " \
+                   "Configured: #{testable_streams.join(", ")}."
         end
-        Rails.cache.write(COOLDOWN_KEY, true, expires_in: COOLDOWN)
 
-        result = SparrowMail.deliver(test_message(configuration, recipient))
-
-        if result.success?
-          held = configuration.sandbox? ? " Sandbox is on, so it was recorded rather than sent." : ""
-          redirect_to root_path,
-            notice: "Test email handed to #{result.adapter} for #{recipient}.#{held} " \
-                    "If it does not arrive, the provider's dashboard has the delivery log."
-        else
-          redirect_to root_path, alert: "#{refusal_sentence(result)} (#{result.error.message})"
-        end
-      rescue SparrowMail::Error => e
-        # ConfigurationError is a SIBLING of DeliveryError, not a subclass, so
-        # the adapter's own rescue does not catch it and it came out of here as
-        # a Rails exception page -- from the panel whose entire job is telling
-        # somebody their settings are wrong.
+        # The preview adapter would happily "succeed" here by writing a file,
+        # and this is the one button on the console that must never do that.
+        # Its entire job is answering "do my credentials work?", and Phase 4
+        # already had to stop it answering yes having reached no network -- back
+        # then because :test was offered in the dropdown. Selecting :preview by
+        # default in development reopened exactly that hole from the other side.
         #
-        # A missing API key is the commonest way to arrive here, and it is a
-        # thing to be told, not a stack trace.
-        redirect_to root_path, alert: "That did not send: #{e.message}"
+        # Asked of each stream, because a second provider is chosen per stream.
+        previewing = streams.find { |stream| configuration.adapter_for_stream(stream) == Report::FALLBACK_ADAPTER }
+        if previewing
+          return redirect_to root_path,
+            alert: "There is no provider to test yet — #{previewing} mail is being written to " \
+                   "#{SparrowMail::Adapters::Preview::DIRECTORY} instead of sent. " \
+                   "Choose one above, save it, and then send a test."
+        end
+
+        sent, refused = [], []
+
+        streams.each do |stream|
+          # A held button or a double-click must not spend sending reputation.
+          # Rails.cache rather than the session, so two browser tabs share one
+          # clock; one clock PER STREAM, so testing both in one press is one
+          # press on each and a second press within the window holds both.
+          # Dev-only page, dev-sized window.
+          if Rails.cache.read(cooldown_key(stream))
+            refused << "A #{stream} test just went out. Give it a moment before sending another."
+            next
+          end
+          Rails.cache.write(cooldown_key(stream), true, expires_in: COOLDOWN)
+
+          result = SparrowMail.deliver(test_message(configuration, recipient, stream))
+
+          if result.success?
+            held = configuration.sandbox? ? " Sandbox is on, so it was recorded rather than sent." : ""
+            sent << "#{stream.to_s.capitalize} test handed to #{result.adapter} for #{recipient}.#{held}"
+          else
+            refused << "#{stream.to_s.capitalize}: #{refusal_sentence(result)} (#{result.error.message})"
+          end
+        rescue SparrowMail::Error => e
+          # ConfigurationError is a SIBLING of DeliveryError, not a subclass,
+          # so the adapter's own rescue does not catch it and it came out of
+          # here as a Rails exception page -- from the panel whose entire job
+          # is telling somebody their settings are wrong.
+          #
+          # A missing API key is the commonest way to arrive here, and it is a
+          # thing to be told, not a stack trace. Per stream, so the other one
+          # still gets its answer.
+          refused << "#{stream.to_s.capitalize} did not send: #{e.message}"
+        end
+
+        if sent.any?
+          sent << "If it does not arrive, the provider's dashboard has the delivery log."
+        end
+
+        redirect_to root_path,
+          notice: sent.any? ? sent.join(" ") : nil,
+          alert: refused.any? ? refused.join(" ") : nil
       end
 
       private
@@ -207,16 +241,53 @@ module SparrowMail
       COOLDOWN = 10.seconds
       COOLDOWN_KEY = "sparrow_mail:console:test_send"
 
-      def test_message(configuration, recipient)
+      # What the form may ask for: one stream by name, or every stream this
+      # application sends on.
+      TEST_EVERY_STREAM = "both"
+
+      def cooldown_key(stream)
+        "#{COOLDOWN_KEY}:#{stream}"
+      end
+
+      # The streams a test can ride, in the order the page lists them: the
+      # transactional stream, then the broadcast one when a second provider
+      # is configured. Read from the live configuration rather than the
+      # stored tree, because a send goes through the live configuration and
+      # a test that answered for a different one would answer a different
+      # question.
+      def testable_streams
+        SparrowMail.configuration.streams.select { |stream| [TRANSACTIONAL, BROADCAST].include?(stream) }
+      end
+
+      # The streams this request asked to test, or nil for a stream that is
+      # not configured -- a forged form value, or a stale page from before a
+      # second provider was taken back out.
+      #
+      # Nothing asked means every stream there is. With one provider that is
+      # just transactional; with two it is both, which is the answer two
+      # providers want.
+      def requested_test_streams
+        asked = params[:stream].to_s
+        return testable_streams if asked.empty? || asked == TEST_EVERY_STREAM
+
+        stream = asked.to_sym
+        testable_streams.include?(stream) ? [stream] : nil
+      end
+
+      def test_message(configuration, recipient, stream)
         Mail.new.tap do |mail|
           mail.from = configuration.default_from
           mail.to = recipient
-          mail.subject = "SparrowKit test email"
+          mail.subject = "SparrowKit test email (#{stream})"
+          # The header is what routes the message; the subject and body are
+          # what tell two of them apart in one inbox.
+          mail[SparrowMail::Envelope::STREAM_HEADER] = stream.to_s
           mail.body = <<~BODY
             This is a test email sent from the SparrowKit control panel at
-            #{Time.current}.
+            #{Time.current}, on the #{stream} stream, through
+            #{configuration.adapter_for_stream(stream)}.
 
-            If you are reading it, your transactional mail settings work.
+            If you are reading it, your #{stream} mail settings work.
           BODY
         end
       end
@@ -303,6 +374,7 @@ module SparrowMail
           @overriding_sender_name ? @sender_name.to_s : @inherited_sender_name
         @sender_email = params.key?(:sender_email) ? params[:sender_email].to_s : stored_email
         @selected = CARDS.to_h { |card| [card, selected_adapter(card)] }
+        @test_streams = test_stream_choices
         @typed = CARDS.to_h { |card| [card, typed_settings(card)] }
         @stored_for = CARDS.to_h { |card| [card, stored_stream(card)] }
         @unregistered = CARDS.to_h { |card| [card, unregistered_adapter(card)] }
@@ -312,6 +384,16 @@ module SparrowMail
 
       # Re-render rather than redirect, so the developer keeps what they typed.
       # flash.now, so it does not survive into the next page.
+      # What the test section offers: each stream a test can ride, with the
+      # brand of the provider it rides through. Only worth a choice when there
+      # are two, so the view checks the size.
+      def test_stream_choices
+        testable_streams.map do |stream|
+          adapter = SparrowMail.configuration.adapter_for_stream(stream)
+          [stream, adapter ? SparrowMail.registry.display_name_for(adapter) : nil]
+        end
+      end
+
       def refuse(message)
         flash.now[:alert] = message
         load_panel

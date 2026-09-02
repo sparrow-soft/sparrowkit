@@ -22,6 +22,13 @@ released in lockstep at one version.
 
 ### Added
 
+- The control panel's test email covers both streams. With two providers
+  configured it offers a choice -- transactional, broadcast, or one message
+  on each, which is the default -- and reports each send on its own, so a
+  broadcast that fails beside a transactional that succeeds is reported as
+  exactly that. Each message names its stream in the subject and body, and
+  the ten-second hold between tests is kept per stream. With one provider
+  nothing changes.
 - `SparrowUi::Console::Settings.move`, which moves one subtree of a module's
   settings to another key with its secrets intact. A panel only ever sees
   secrets masked, so it could not rename a section through `write` without
