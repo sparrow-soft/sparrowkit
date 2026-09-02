@@ -7,6 +7,8 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.3.0 - 2026-09-02
+
 ### Changed
 
 - The control panel's second mail stream is `broadcast`, which is what the

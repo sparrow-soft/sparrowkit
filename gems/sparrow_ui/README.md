@@ -17,7 +17,7 @@ It belongs in your **development group**, and must never be outside it:
 
 ```ruby
 # Gemfile -- not on RubyGems yet, so it comes from the repository
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.2.0", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.3.0", glob: "gems/*/*.gemspec" do
   group :development do
     gem "sparrow_ui"
   end

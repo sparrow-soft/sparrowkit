@@ -49,7 +49,7 @@ and cannot be signed in.
 # Not on RubyGems yet, and the gems pin each other to an exact version, so they
 # come from the repository in one `git` block. The glob lets Bundler resolve
 # sparrow_mail from the same source, which sparrow_auth requires.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.2.0", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.3.0", glob: "gems/*/*.gemspec" do
   gem "sparrow_auth"
 end
 ```

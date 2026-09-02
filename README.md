@@ -32,7 +32,7 @@ production:
 # own from RubyGems -- sparrow_auth depends on exactly this version of
 # sparrow_mail, and sparrow_pay on exactly this version of sparrow_auth, so
 # every gem in the chain has to come from the same source.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.2.0", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.3.0", glob: "gems/*/*.gemspec" do
   gem "sparrow_auth"   # passkeys, organizations, invitations
   gem "sparrow_mail"   # transactional and broadcast email
   gem "sparrow_pay"    # subscription billing
