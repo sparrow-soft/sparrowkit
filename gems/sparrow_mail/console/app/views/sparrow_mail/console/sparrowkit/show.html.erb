@@ -199,15 +199,29 @@
   SparrowKit need a sanctioned way to answer "does mail actually work?"
   without scaffolding probe pages of their own.
 
-  A real send through the configured provider, on the transactional stream,
-  which is why the recipient is typed rather than guessed: nothing here
-  should mail anybody the developer did not just name.
+  A real send through the configured provider, which is why the recipient is
+  typed rather than guessed: nothing here should mail anybody the developer
+  did not just name.
+
+  With one provider it rides the transactional stream and there is nothing to
+  choose. With two there is a choice -- transactional, broadcast, or one of
+  each -- because two providers are two sets of credentials and two
+  reputations, and a test that proved one of them leaves the newsletter path
+  unproven until the first newsletter. One of each is the default for that
+  reason. The choice is rendered from the live configuration's streams, not
+  from the cards above, so it matches what a send would actually do.
 %>
 <section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
   <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Send a test email</h2>
   <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-    One real message through the provider configured above, the same way the
-    application sends. The quickest answer to "are these credentials right?".
+    <% if @test_streams.size > 1 %>
+      One real message per stream, through the provider each is configured
+      with, the same way the application sends. The quickest answer to "are
+      both sets of credentials right?".
+    <% else %>
+      One real message through the provider configured above, the same way the
+      application sends. The quickest answer to "are these credentials right?".
+    <% end %>
   </p>
 
   <form action="<%= test_send_path %>" method="post" autocomplete="off" class="mt-4">
@@ -224,8 +238,43 @@
            spellcheck="false"
            class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 font-mono text-sm text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-      Your own address, usually. It rides the transactional stream.
+      <% if @test_streams.size > 1 %>
+        Your own address, usually. Each message says which stream it rode.
+      <% else %>
+        Your own address, usually. It rides the transactional stream.
+      <% end %>
     </p>
+
+    <% if @test_streams.size > 1 %>
+      <fieldset class="mt-4">
+        <legend class="text-sm font-medium text-slate-900 dark:text-slate-100">Send it on</legend>
+        <div class="mt-2 space-y-2">
+          <% @test_streams.each do |stream, provider| %>
+            <div class="flex items-center gap-3">
+              <input type="radio"
+                     id="sparrow_mail_test_stream_<%= stream %>"
+                     name="stream"
+                     value="<%= stream %>"
+                     class="h-4 w-4 border-slate-500 text-purple-900">
+              <label for="sparrow_mail_test_stream_<%= stream %>" class="text-sm text-slate-900 dark:text-slate-100">
+                <%= stream.to_s.capitalize %><% if provider %>, through <%= provider %><% end %>
+              </label>
+            </div>
+          <% end %>
+          <div class="flex items-center gap-3">
+            <input type="radio"
+                   id="sparrow_mail_test_stream_both"
+                   name="stream"
+                   value="both"
+                   checked
+                   class="h-4 w-4 border-slate-500 text-purple-900">
+            <label for="sparrow_mail_test_stream_both" class="text-sm text-slate-900 dark:text-slate-100">
+              Both, one message each
+            </label>
+          </div>
+        </div>
+      </fieldset>
+    <% end %>
 
     <button type="submit"
             class="mt-3 rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-800 dark:bg-purple-300 dark:text-purple-950 dark:hover:bg-purple-200">
