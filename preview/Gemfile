@@ -14,7 +14,7 @@ source "https://rubygems.org"
 # Adding these four to a gem's Gemfile instead would have put webauthn and a
 # payment SDK into sparrow_ui's test bundle to render a nav bar.
 gem "rails", ">= 7.1", "< 9"
-gem "puma", "~> 6.0"
+gem "puma", "~> 8.0"
 
 # PostgreSQL, and SQLite will not do.
 #
