@@ -7,6 +7,8 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.2.0 - 2026-09-02
+
 ### Added
 
 - The control panel asks for everything Amazon SES needs. The region is a
