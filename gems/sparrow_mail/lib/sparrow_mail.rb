@@ -94,6 +94,17 @@ module SparrowMail
   # Keys at that level that are settings rather than streams.
   CREDENTIALS_SCALARS = [:default_from, :sandbox].freeze
 
+  # Stream keys the control panel used to write, and what they mean now.
+  #
+  # Before 1.3.0 the panel stored the second provider under `marketing:`,
+  # while this README, the Postmark adapter and the conformance suite all
+  # called that stream `broadcast` -- so a developer who configured two
+  # providers on the panel and then set the header the README showed them
+  # got "unknown stream :broadcast" from the fail-closed lookup below. The
+  # panel now writes `broadcast:` and rewrites an old key on its next save;
+  # this is what keeps mail sending, as broadcast, in between.
+  CREDENTIALS_STREAM_ALIASES = {marketing: :broadcast}.freeze
+
   class << self
     def configuration
       @configuration ||= Configuration.new
@@ -187,6 +198,14 @@ module SparrowMail
         stored.each do |name, value|
           next unless value.is_a?(Hash)
           next if CREDENTIALS_SCALARS.include?(name.to_sym)
+
+          # An old key is read under its current name, unless the current
+          # name is stored as well, in which case the old one is stale and
+          # the panel's next save will remove it.
+          if CREDENTIALS_STREAM_ALIASES.key?(name.to_sym)
+            next if stored.key?(CREDENTIALS_STREAM_ALIASES[name.to_sym])
+            name = CREDENTIALS_STREAM_ALIASES[name.to_sym]
+          end
 
           adapter = value[:adapter]
           settings = value.except(:adapter)

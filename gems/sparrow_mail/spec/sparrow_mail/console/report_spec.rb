@@ -151,7 +151,7 @@ RSpec.describe SparrowMail::Console::Report do
     # The trap this gem was reworked to prevent, reported before it bites. A
     # stream sending through a different provider inherits no credentials, so
     # one that forgot to declare its own fails to authenticate the first time it
-    # sends — which for a marketing stream might be a month later.
+    # sends — which for a broadcast stream might be a month later.
     it "catches a stream that sends through another provider with no key of its own" do
       configuration = config { |c|
         c.adapter = :postmark

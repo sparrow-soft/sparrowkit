@@ -26,6 +26,35 @@ RSpec.describe SparrowUi::Console::Settings do
   before { reset! }
   after { reset! }
 
+  describe ".move" do
+    it "moves a subtree to a new key with its secrets intact" do
+      # The reason this exists. A panel sees secrets masked, so it cannot
+      # rename a section through write without losing the key inside it.
+      reset!(mail: {transactional: {adapter: "postmark"}, second: {adapter: "mailgun", api_key: "mg-live-9876"}})
+
+      expect(described_class.move(:mail, from: :second, to: :broadcast)).to be(true)
+
+      expect(stored).not_to have_key(:second)
+      expect(stored[:broadcast]).to eq(adapter: "mailgun", api_key: "mg-live-9876")
+      expect(stored[:transactional]).to eq(adapter: "postmark")
+    end
+
+    it "does nothing when there is nothing under the old key" do
+      reset!(mail: {transactional: {adapter: "postmark"}})
+
+      expect(described_class.move(:mail, from: :second, to: :broadcast)).to be(false)
+      expect(stored).to eq(transactional: {adapter: "postmark"})
+    end
+
+    it "only removes the old key when the new one is already there" do
+      reset!(mail: {second: {adapter: "mailgun", api_key: "mg-old"}, broadcast: {adapter: "sendgrid", api_key: "sg-live"}})
+
+      described_class.move(:mail, from: :second, to: :broadcast)
+
+      expect(stored).to eq(broadcast: {adapter: "sendgrid", api_key: "sg-live"})
+    end
+  end
+
   describe ".for_display" do
     it "masks a secret to presence and its last four characters" do
       reset!(mail: {adapter: "postmark", api_key: "pm-live-9876"})
@@ -116,12 +145,12 @@ RSpec.describe SparrowUi::Console::Settings do
     it "removes a key given nil, so a panel can say a section has gone" do
       reset!(mail: {
         transactional: {adapter: "postmark"},
-        marketing: {adapter: "mailgun", api_key: "mg-live-9876"}
+        broadcast: {adapter: "mailgun", api_key: "mg-live-9876"}
       })
 
-      described_class.write(:mail, {marketing: nil})
+      described_class.write(:mail, {broadcast: nil})
 
-      expect(stored).not_to have_key(:marketing)
+      expect(stored).not_to have_key(:broadcast)
       expect(stored[:transactional]).to eq(adapter: "postmark")
     end
 

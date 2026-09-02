@@ -41,11 +41,11 @@ RSpec.describe "SparrowMail.apply_credentials!" do
   it "declares any other key as a stream, exactly as an initializer would" do
     apply({
       transactional: {adapter: :postmark, api_key: "pm-live"},
-      marketing: {adapter: :mailgun, api_key: "mg-live", domain: "news.acme.test"}
+      broadcast: {adapter: :mailgun, api_key: "mg-live", domain: "news.acme.test"}
     })
 
-    expect(SparrowMail.configuration.adapter_for_stream(:marketing)).to eq(:mailgun)
-    expect(SparrowMail.configuration.adapter_settings_for(:marketing))
+    expect(SparrowMail.configuration.adapter_for_stream(:broadcast)).to eq(:mailgun)
+    expect(SparrowMail.configuration.adapter_settings_for(:broadcast))
       .to include(api_key: "mg-live", domain: "news.acme.test")
   end
 
@@ -54,10 +54,10 @@ RSpec.describe "SparrowMail.apply_credentials!" do
     # meaningless to another, so credentials must not be inherited across them.
     apply({
       transactional: {adapter: :postmark, api_key: "pm-live"},
-      marketing: {adapter: :mailgun, api_key: "mg-live"}
+      broadcast: {adapter: :mailgun, api_key: "mg-live"}
     })
 
-    expect(SparrowMail.configuration.adapter_settings_for(:marketing)).not_to include(api_key: "pm-live")
+    expect(SparrowMail.configuration.adapter_settings_for(:broadcast)).not_to include(api_key: "pm-live")
   end
 
   it "carries shared_identity through rather than dropping it" do
@@ -65,16 +65,41 @@ RSpec.describe "SparrowMail.apply_credentials!" do
     # the console having saved something broken.
     apply({
       transactional: {adapter: :postmark, api_key: "pm-live"},
-      marketing: {adapter: :postmark, api_key: "pm-live", shared_identity: true}
+      broadcast: {adapter: :postmark, api_key: "pm-live", shared_identity: true}
     })
 
-    expect(SparrowMail.configuration.shared_identity?(:marketing)).to be(true)
+    expect(SparrowMail.configuration.shared_identity?(:broadcast)).to be(true)
   end
 
   it "does not treat shared_identity as a provider setting" do
-    apply({marketing: {adapter: :postmark, api_key: "pm-live", shared_identity: true}})
+    apply({broadcast: {adapter: :postmark, api_key: "pm-live", shared_identity: true}})
 
-    expect(SparrowMail.configuration.adapter_settings_for(:marketing)).not_to have_key(:shared_identity)
+    expect(SparrowMail.configuration.adapter_settings_for(:broadcast)).not_to have_key(:shared_identity)
+  end
+
+  # What the panel wrote before 1.3.0. Read as broadcast so that mail keeps
+  # sending and the README's header stops being refused as unknown; the
+  # panel removes the old key on its next save.
+  it "reads the panel's old name for the broadcast stream as broadcast" do
+    apply({
+      transactional: {adapter: :postmark, api_key: "pm-live"},
+      marketing: {adapter: :mailgun, api_key: "mg-live", domain: "news.acme.test"}
+    })
+
+    expect(SparrowMail.configuration.stream?(:broadcast)).to be(true)
+    expect(SparrowMail.configuration.stream?(:marketing)).to be(false)
+    expect(SparrowMail.configuration.adapter_for_stream(:broadcast)).to eq(:mailgun)
+  end
+
+  it "lets a broadcast key win over a stale old one beside it" do
+    apply({
+      transactional: {adapter: :postmark, api_key: "pm-live"},
+      marketing: {adapter: :mailgun, api_key: "mg-old"},
+      broadcast: {adapter: :sendgrid, api_key: "sg-live"}
+    })
+
+    expect(SparrowMail.configuration.adapter_for_stream(:broadcast)).to eq(:sendgrid)
+    expect(SparrowMail.configuration.stream?(:marketing)).to be(false)
   end
 
   it "does not mistake default_from for a stream" do

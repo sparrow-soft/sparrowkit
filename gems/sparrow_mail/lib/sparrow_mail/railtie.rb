@@ -55,7 +55,7 @@ module SparrowMail
     #     transactional:
     #       adapter: postmark
     #       api_key: ...
-    #     marketing:
+    #     broadcast:
     #       adapter: mailgun
     #       api_key: ...
     #

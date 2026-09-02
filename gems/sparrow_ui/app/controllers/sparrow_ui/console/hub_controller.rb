@@ -28,7 +28,7 @@ module SparrowUi
       # own section. Says what the thing IS, so the rest reads as detail.
       PREAMBLE = <<~TEXT
         I am building a Rails application on SparrowKit, a set of Rails engines
-        that provide authentication, transactional and marketing email, and
+        that provide authentication, transactional and broadcast email, and
         subscription billing. The engines are already installed and configured;
         what follows describes how, and what they give me.
 
