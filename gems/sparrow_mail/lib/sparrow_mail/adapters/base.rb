@@ -92,17 +92,32 @@ module SparrowMail
           @required_settings || []
         end
 
-        # Settings the adapter reads when they are present and works without
-        # when they are not. Not checked at construction. Declared so the
-        # control panel can ask for them: a setting that is only ever
+        # Settings the adapter needs a value for, and finds on its own when
+        # none is given. Not checked at construction, because the value may
+        # arrive by another route; shown on the control panel without the
+        # "Optional" mark, because a blank box is not the same as no value.
+        #
+        # Amazon SES is the reason this exists. Its credentials are necessary
+        # for a send, and the AWS SDK looks for them itself -- environment,
+        # shared profile, instance role -- before giving up. An adapter that
+        # insisted on them would refuse to boot on the production deployment
+        # that is doing it right, with a role and no key stored anywhere. A
+        # developer setting up on a laptop still has to put them somewhere,
+        # and until this existed the panel offered no box.
+        #
+        # The order given here is the order the panel shows them in.
+        def fallback_settings(*names)
+          @fallback_settings = names.map(&:to_sym) unless names.empty?
+          @fallback_settings || []
+        end
+
+        # Settings the adapter reads when they are present and has no need
+        # of when they are not. Not checked at construction, and marked
+        # "Optional" on the control panel, which is the one thing on a card
+        # of identical boxes that tells a developer they can stop. Declared
+        # so the panel can ask for them: a setting that is only ever
         # mentioned in a doc comment is one a developer has to know to go and
         # type into the credentials file by hand.
-        #
-        # Amazon SES is the reason this exists. Its credentials are optional
-        # to the adapter, because the AWS SDK will find them on its own from
-        # the environment or an instance role, and yet a developer setting up
-        # on a laptop has to put them somewhere, and the panel offered no
-        # box. The order given here is the order the panel shows them in.
         def optional_settings(*names)
           @optional_settings = names.map(&:to_sym) unless names.empty?
           @optional_settings || []

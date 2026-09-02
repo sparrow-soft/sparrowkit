@@ -114,12 +114,13 @@ dropdown of the regions where SES is offered, read from the SDK's own data, so
 it is current whenever the SDK is. Pick the one your sending domain or address
 is verified in; SES refuses mail from any other.
 
-The access key ID and secret access key are optional to the adapter but not to
-sending: leave them blank only if the AWS SDK can already find credentials on
-its own, through the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+The access key ID and secret access key are needed for every send, but the
+adapter does not insist on them at boot, because the AWS SDK can find
+credentials on its own: the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
 environment variables, a profile in `~/.aws`, or an instance role. That is the
-right arrangement in production, where a role beats a stored key. On a laptop
-with none of those, type them into the panel. A send with neither raises
+right arrangement in production, where a role beats a stored key, and an
+adapter that demanded a key would refuse to start there. On a laptop with none
+of those, type them into the panel. A send with neither raises
 `ConfigurationError` and says so, naming both places.
 
 ## Sending

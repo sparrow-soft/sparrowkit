@@ -195,16 +195,22 @@ RSpec.describe SparrowMail::Adapters::SES do
   end
 
   # What the control panel asks for. The region is the one thing the adapter
-  # cannot do without; the two credentials are declared so the panel offers a
-  # box for them, but stay optional because the SDK finds them on its own from
-  # the environment or an instance role, which is how production should work.
+  # refuses to build without. The two credentials are necessary for a send
+  # and yet not checked at construction, because the SDK finds them on its
+  # own from the environment or an instance role, which is how production
+  # should work -- so they are declared as settings with a fallback, not as
+  # optional ones, and the panel does not mark them as something to skip.
   describe "what it asks the control panel for" do
     it "requires only the region" do
       expect(described_class.required_settings).to eq([:region])
     end
 
-    it "asks for, but does not insist on, the two credentials" do
-      expect(described_class.optional_settings).to eq([:access_key_id, :secret_access_key])
+    it "asks for the two credentials, as settings the SDK can find elsewhere" do
+      expect(described_class.fallback_settings).to eq([:access_key_id, :secret_access_key])
+    end
+
+    it "calls nothing optional" do
+      expect(described_class.optional_settings).to be_empty
     end
 
     describe "the region list" do
@@ -250,7 +256,7 @@ RSpec.describe SparrowMail::Adapters::SES do
 
     it "explains each setting, and says when the credentials may be left blank" do
       expect(described_class.setting_hint(:region)).to include("verified")
-      expect(described_class.setting_hint(:access_key_id)).to include("Leave both blank only if")
+      expect(described_class.setting_hint(:access_key_id)).to include("Needed unless")
       expect(described_class.setting_hint(:secret_access_key)).to include("AWS_SECRET_ACCESS_KEY")
     end
   end

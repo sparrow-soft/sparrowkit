@@ -16,17 +16,18 @@ module SparrowMail
     #   config.adapter  = :ses
     #   config.settings = {
     #     region: "us-east-1",
-    #     access_key_id: ENV["AWS_ACCESS_KEY_ID"],          # optional
-    #     secret_access_key: ENV["AWS_SECRET_ACCESS_KEY"]   # optional
+    #     access_key_id: ENV["AWS_ACCESS_KEY_ID"],
+    #     secret_access_key: ENV["AWS_SECRET_ACCESS_KEY"]
     #   }
     #
     # `region` is required and must be one where SES is offered; the control
     # panel offers the list, taken from the AWS SDK's own region data. The two
-    # credentials are optional to the adapter: left out, the AWS SDK looks
-    # for them itself -- the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-    # environment variables, a shared profile in ~/.aws, or an instance role
-    # -- which is the right answer in production. On a laptop with none of
-    # those, the panel is where they go, and a send with neither says so.
+    # credentials are necessary for a send but not checked at construction:
+    # left out, the AWS SDK looks for them itself -- the AWS_ACCESS_KEY_ID and
+    # AWS_SECRET_ACCESS_KEY environment variables, a shared profile in ~/.aws,
+    # or an instance role -- which is the right answer in production. On a
+    # laptop with none of those, the panel is where they go, and a send with
+    # neither says so.
     #
     # This adapter posts the message as raw MIME rather than rebuilding it as a
     # structured payload. SES accepts that, and it means attachments, encoding
@@ -52,7 +53,7 @@ module SparrowMail
       adapter_name :ses
       display_name "Amazon SES"
       required_settings :region
-      optional_settings :access_key_id, :secret_access_key
+      fallback_settings :access_key_id, :secret_access_key
 
       # The partition data's own name for the service this adapter calls.
       # `Aws::Partitions::Region#services` lists what each region offers, and
@@ -82,10 +83,9 @@ module SparrowMail
           "The region your sending domain or address is verified in. " \
             "Sending from any other region is refused by SES."
         when :access_key_id, :secret_access_key
-          "From an IAM user allowed to send through SES. Leave both blank only if " \
-            "the AWS SDK can already find credentials on its own: the AWS_ACCESS_KEY_ID " \
-            "and AWS_SECRET_ACCESS_KEY environment variables, a profile in ~/.aws, or " \
-            "an instance role."
+          "From an IAM user allowed to send through SES. Needed unless the AWS SDK " \
+            "already has credentials from the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY " \
+            "environment variables, a profile in ~/.aws, or an instance role."
         end
       end
 

@@ -657,9 +657,9 @@ RSpec.describe "the mail control panel", type: :request do
   end
 
   # Amazon SES is named here because the behaviour under test is a setting
-  # with a known set of values and settings an adapter works without, and SES
-  # is the one shipped adapter that has both. The panel itself still knows
-  # nothing about it: the region list and the "Optional" marks come from the
+  # with a known set of values and settings an adapter can find elsewhere,
+  # and SES is the one shipped adapter that has both. The panel itself still
+  # knows nothing about it: the region list and the hints come from the
   # adapter class, through SparrowMail::Console::Adapters.
   describe "a provider whose adapter says more about its settings" do
     let(:ses) { SparrowMail.registry.fetch(:ses) }
@@ -694,17 +694,42 @@ RSpec.describe "the mail control panel", type: :request do
       expect(response.body).to match(/id="mail_primary_ses_region".*?<option value="" selected>/m)
     end
 
-    it "asks for the credentials the adapter works without, marked as such" do
+    it "asks for the credentials the adapter does not insist on" do
       get PANEL
 
       expect(response.body).to include(%(name="primary[settings][ses][access_key_id]"))
       expect(response.body).to include(%(name="primary[settings][ses][secret_access_key]"))
+    end
 
-      label = response.body[/<label for="mail_primary_ses_secret_access_key".*?<\/label>/m]
-      expect(label).to include("Optional")
+    it "does not call them optional, because a send cannot do without them" do
+      # The SDK may already have credentials from the environment, which is
+      # why the adapter builds without them; that is not the same as a
+      # developer being free to skip the box, which is what "Optional" says.
+      # The hint beneath the box is where the blank-is-fine case is explained.
+      get PANEL
 
-      region_label = response.body[/<label for="mail_primary_ses_region".*?<\/label>/m]
-      expect(region_label).not_to include("Optional")
+      %i[region access_key_id secret_access_key].each do |setting|
+        label = response.body[/<label for="mail_primary_ses_#{setting}".*?<\/label>/m]
+
+        expect(label).not_to include("Optional")
+      end
+    end
+
+    it "marks a setting optional when an adapter says it has no need of it" do
+      pigeon = Class.new(SparrowMail::Adapters::Base) do
+        adapter_name :racing_pigeon
+        required_settings :loft
+        optional_settings :ring_id
+      end
+      SparrowMail.register_adapter(:racing_pigeon, pigeon)
+
+      get PANEL
+
+      ring = response.body[/<label for="mail_primary_racing_pigeon_ring_id".*?<\/label>/m]
+      loft = response.body[/<label for="mail_primary_racing_pigeon_loft".*?<\/label>/m]
+
+      expect(ring).to include("Optional")
+      expect(loft).not_to include("Optional")
     end
 
     it "masks both credentials, the way it masks any other key" do
@@ -725,7 +750,7 @@ RSpec.describe "the mail control panel", type: :request do
     it "shows the adapter's own sentence about a setting" do
       get PANEL
 
-      expect(response.body).to include("Leave both blank only if")
+      expect(response.body).to include("Needed unless the AWS SDK already has credentials")
     end
 
     it "saves the region and both credentials" do

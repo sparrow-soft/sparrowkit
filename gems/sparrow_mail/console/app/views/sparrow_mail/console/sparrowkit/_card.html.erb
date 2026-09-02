@@ -189,10 +189,13 @@
             <div>
               <label for="<%= field_id %>" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
                 <%= field.label %>
-                <%# The adapter said it works without this one. Say so, in the
-                    accent, so a developer setting up on a machine where the
-                    AWS SDK already has credentials knows they can leave it. %>
-                <% unless field.required? %>
+                <%# The adapter said it has no need of this one. Say so, in the
+                    accent. Not shown for a setting the adapter finds elsewhere
+                    when the box is blank -- an AWS key the SDK may already
+                    have from the environment -- because "Optional" tells a
+                    developer they can stop, and there they cannot; the hint
+                    beneath says when a blank box is right. %>
+                <% if field.optional? %>
                   <%= render "sparrow_ui/console/optional" %>
                 <% end %>
                 <% if field.secret? && stored.is_a?(Hash) && stored[:set] %>

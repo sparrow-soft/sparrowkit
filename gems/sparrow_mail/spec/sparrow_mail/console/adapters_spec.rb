@@ -41,16 +41,30 @@ RSpec.describe SparrowMail::Console::Adapters do
         klass = SparrowMail.registry.fetch(choice.name)
 
         expect(choice.fields.map(&:name))
-          .to eq(klass.required_settings + klass.optional_settings)
+          .to eq(klass.required_settings + klass.fallback_settings + klass.optional_settings)
       end
     end
 
-    it "marks the fields an adapter works without" do
+    it "says of each field how much the adapter needs it" do
+      described_class.all.each do |choice|
+        klass = SparrowMail.registry.fetch(choice.name)
+        by_kind = choice.fields.group_by(&:kind).transform_values { |fields| fields.map(&:name) }
+
+        expect(by_kind.fetch(:required, [])).to eq(klass.required_settings)
+        expect(by_kind.fetch(:fallback, [])).to eq(klass.fallback_settings)
+        expect(by_kind.fetch(:optional, [])).to eq(klass.optional_settings)
+      end
+    end
+
+    # The mark is what tells a developer they can stop. A setting the adapter
+    # finds elsewhere when the box is blank is not one they can stop at, so
+    # it is not optional, whatever the construction-time check says.
+    it "marks as optional only the fields an adapter has no need of" do
       described_class.all.each do |choice|
         klass = SparrowMail.registry.fetch(choice.name)
 
+        expect(choice.fields.select(&:optional?).map(&:name)).to eq(klass.optional_settings)
         expect(choice.fields.select(&:required?).map(&:name)).to eq(klass.required_settings)
-        expect(choice.fields.reject(&:required?).map(&:name)).to eq(klass.optional_settings)
       end
     end
 
@@ -107,6 +121,7 @@ RSpec.describe SparrowMail::Console::Adapters do
       pigeon = Class.new(SparrowMail::Adapters::Base) do
         adapter_name :homing_pigeon
         required_settings :loft
+        fallback_settings :handler
         optional_settings :ring_id
 
         def self.setting_choices(name)
@@ -114,21 +129,34 @@ RSpec.describe SparrowMail::Console::Adapters do
         end
 
         def self.setting_hint(name)
-          "Stamped on the bird's leg." if name == :ring_id
+          case name
+          when :handler then "Whoever is on duty, if this is blank."
+          when :ring_id then "Stamped on the bird's leg."
+          end
         end
       end
       SparrowMail.register_adapter(:homing_pigeon, pigeon)
 
-      loft, ring = described_class.find(:homing_pigeon).fields
+      loft, handler, ring = described_class.find(:homing_pigeon).fields
 
       expect(loft).to be_required
       expect(loft).to be_choices
       expect(loft.choices).to eq([["north", "North loft"], ["south", "South loft"]])
       expect(loft.hint).to be_nil
 
-      expect(ring).not_to be_required
+      expect(handler.kind).to eq(:fallback)
+      expect(handler).not_to be_required
+      expect(handler).not_to be_optional
+      expect(handler.hint).to eq("Whoever is on duty, if this is blank.")
+
+      expect(ring).to be_optional
       expect(ring).not_to be_choices
       expect(ring.hint).to eq("Stamped on the bird's leg.")
+    end
+
+    it "refuses a kind of need it does not have a word for" do
+      expect { SparrowMail::Console::Adapters::Field.new(:loft, kind: :whenever) }
+        .to raise_error(ArgumentError, /whenever/)
     end
 
     # A plain adapter says nothing about its settings, and the panel renders
