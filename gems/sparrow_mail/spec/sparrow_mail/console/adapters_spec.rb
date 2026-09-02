@@ -36,10 +36,21 @@ RSpec.describe SparrowMail::Console::Adapters do
       expect(described_class.find(:preview)).not_to be_provider
     end
 
-    it "takes each adapter's fields from that adapter" do
+    it "takes each adapter's fields from that adapter, required ones first" do
       described_class.all.each do |choice|
+        klass = SparrowMail.registry.fetch(choice.name)
+
         expect(choice.fields.map(&:name))
-          .to eq(SparrowMail.registry.fetch(choice.name).required_settings)
+          .to eq(klass.required_settings + klass.optional_settings)
+      end
+    end
+
+    it "marks the fields an adapter works without" do
+      described_class.all.each do |choice|
+        klass = SparrowMail.registry.fetch(choice.name)
+
+        expect(choice.fields.select(&:required?).map(&:name)).to eq(klass.required_settings)
+        expect(choice.fields.reject(&:required?).map(&:name)).to eq(klass.optional_settings)
       end
     end
 
@@ -86,6 +97,49 @@ RSpec.describe SparrowMail::Console::Adapters do
 
       expect(choice.fields.map(&:name)).to eq([:loft, :ring_id])
       expect(choice.fields.map(&:label)).to eq(["Loft", "Ring ID"])
+    end
+
+    # The same argument, for everything a field carries beyond its name. An
+    # adapter that says which values a setting may take, or what a setting
+    # is, gets a dropdown and a sentence on the panel without the panel
+    # knowing the adapter exists.
+    it "passes through what an adapter says about each of its settings" do
+      pigeon = Class.new(SparrowMail::Adapters::Base) do
+        adapter_name :homing_pigeon
+        required_settings :loft
+        optional_settings :ring_id
+
+        def self.setting_choices(name)
+          [["north", "North loft"], ["south", "South loft"]] if name == :loft
+        end
+
+        def self.setting_hint(name)
+          "Stamped on the bird's leg." if name == :ring_id
+        end
+      end
+      SparrowMail.register_adapter(:homing_pigeon, pigeon)
+
+      loft, ring = described_class.find(:homing_pigeon).fields
+
+      expect(loft).to be_required
+      expect(loft).to be_choices
+      expect(loft.choices).to eq([["north", "North loft"], ["south", "South loft"]])
+      expect(loft.hint).to be_nil
+
+      expect(ring).not_to be_required
+      expect(ring).not_to be_choices
+      expect(ring.hint).to eq("Stamped on the bird's leg.")
+    end
+
+    # A plain adapter says nothing about its settings, and the panel renders
+    # a required text box for each. That is the whole of what an adapter has
+    # to do, and the reason the base class answers nil for both questions.
+    it "asks nothing more of an adapter that only names its settings" do
+      described_class.find(:postmark).fields.each do |field|
+        expect(field).to be_required
+        expect(field).not_to be_choices
+        expect(field.hint).to be_nil
+      end
     end
   end
 

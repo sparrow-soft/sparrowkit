@@ -92,6 +92,41 @@ module SparrowMail
           @required_settings || []
         end
 
+        # Settings the adapter reads when they are present and works without
+        # when they are not. Not checked at construction. Declared so the
+        # control panel can ask for them: a setting that is only ever
+        # mentioned in a doc comment is one a developer has to know to go and
+        # type into the credentials file by hand.
+        #
+        # Amazon SES is the reason this exists. Its credentials are optional
+        # to the adapter, because the AWS SDK will find them on its own from
+        # the environment or an instance role, and yet a developer setting up
+        # on a laptop has to put them somewhere, and the panel offered no
+        # box. The order given here is the order the panel shows them in.
+        def optional_settings(*names)
+          @optional_settings = names.map(&:to_sym) unless names.empty?
+          @optional_settings || []
+        end
+
+        # The values a setting may take, when it is one of a known set: an
+        # array of `[value, label]` pairs, or nil for a setting that is typed
+        # freely. The control panel renders a dropdown for the former and a
+        # text box for the latter, and keeps no list of its own. Asked of the
+        # adapter, because the adapter is what knows -- SES answers with the
+        # regions where the service is offered, taken from the AWS SDK's own
+        # data rather than typed out somewhere that would go stale.
+        def setting_choices(_name)
+          nil
+        end
+
+        # A sentence beside a setting's box, or nil. The panel already says
+        # where a value is stored; this is for what the value *is* -- the sort
+        # of thing a developer setting up a provider for the first time would
+        # otherwise open the provider's documentation to find out.
+        def setting_hint(_name)
+          nil
+        end
+
         # True when the provider has a sandbox of its own that we can switch on
         # per request. Adapters that say true still make the request in sandbox
         # mode, which exercises the full path; adapters that say false are

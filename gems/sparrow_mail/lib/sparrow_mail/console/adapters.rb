@@ -20,12 +20,33 @@ module SparrowMail
       # from adapters nobody here has read.
       ACRONYMS = %w[api dns id ip smtp ssl tls uri url].freeze
 
-      # One setting an adapter requires, as the form renders it.
+      # One setting an adapter asks for, as the form renders it.
+      #
+      # Everything here beyond the name is the adapter's answer, passed
+      # through: whether the setting is required, the values it may take, and
+      # a sentence about what it is. The console adds nothing of its own, so a
+      # provider's dropdown or hint changes when the adapter does and not when
+      # somebody remembers to edit a view.
       class Field
-        attr_reader :name
+        attr_reader :name, :choices, :hint
 
-        def initialize(name)
+        def initialize(name, required: true, choices: nil, hint: nil)
           @name = name.to_sym
+          @required = required
+          @choices = choices
+          @hint = hint
+        end
+
+        # False for a setting the adapter works without. The panel marks it
+        # so, and the marker is what tells a developer they can stop.
+        def required?
+          @required
+        end
+
+        # True when the adapter listed the values this setting may take, in
+        # which case the panel renders a dropdown rather than a text box.
+        def choices?
+          !choices.nil? && !choices.empty?
         end
 
         # :api_key -> "API key". Derived rather than looked up, because these
@@ -173,7 +194,7 @@ module SparrowMail
         Choice.new(
           name: name,
           display_name: klass.display_name,
-          fields: klass.required_settings.map { |setting| Field.new(setting) },
+          fields: fields_for(klass),
           identity_fields: klass.identity_settings.map { |setting| Field.new(setting) },
           reputation_bearing: klass.reputation_bearing?,
           provider: klass.provider?
@@ -186,6 +207,23 @@ module SparrowMail
           name: name,
           display_name: SparrowMail.registry.display_name_for(name),
           unavailable_reason: e.message
+        )
+      end
+
+      # Every setting the adapter asks for, required ones first and then the
+      # ones it works without, each carrying what the adapter says about it.
+      def fields_for(klass)
+        required = klass.required_settings.map { |setting| field_for(klass, setting, required: true) }
+        optional = klass.optional_settings.map { |setting| field_for(klass, setting, required: false) }
+        required + optional
+      end
+
+      def field_for(klass, setting, required:)
+        Field.new(
+          setting,
+          required: required,
+          choices: klass.setting_choices(setting),
+          hint: klass.setting_hint(setting)
         )
       end
     end

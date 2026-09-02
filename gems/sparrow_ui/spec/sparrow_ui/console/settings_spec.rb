@@ -125,6 +125,17 @@ RSpec.describe SparrowUi::Console::Settings do
       expect(stored[:transactional]).to eq(adapter: "postmark")
     end
 
+    it "leaves a nil out of a section written for the first time" do
+      # `nil` means "not this key" whether or not the section existed. Before,
+      # a first save wrote the key with nothing after the colon, which read
+      # back as nil and looked like a half-finished edit in the file.
+      reset!(mail: {})
+
+      described_class.write(:mail, {transactional: {adapter: "ses", region: "eu-west-1", access_key_id: nil}})
+
+      expect(stored[:transactional]).to eq(adapter: "ses", region: "eu-west-1")
+    end
+
     it "removes one setting without disturbing its neighbours" do
       reset!(mail: {transactional: {adapter: "mailgun", api_key: "mg-9876", domain: "mail.acme.test"}})
 

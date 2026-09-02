@@ -189,6 +189,12 @@
             <div>
               <label for="<%= field_id %>" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
                 <%= field.label %>
+                <%# The adapter said it works without this one. Say so, in the
+                    accent, so a developer setting up on a machine where the
+                    AWS SDK already has credentials knows they can leave it. %>
+                <% unless field.required? %>
+                  <%= render "sparrow_ui/console/optional" %>
+                <% end %>
                 <% if field.secret? && stored.is_a?(Hash) && stored[:set] %>
                   <%= render "sparrow_ui/console/secret_set" %>
                 <% end %>
@@ -199,6 +205,16 @@
                 stops the browser offering to save an API key to the developer's
                 password manager -- see the partial for why `autocomplete="off"`
                 cannot do it. A non-secret is an ordinary box and stays here.
+
+                A setting whose adapter listed the values it may take is a
+                dropdown. The list is the adapter's -- Amazon SES answers with
+                the regions where SES is offered, from the AWS SDK's own data
+                -- so there is still no provider knowledge on this page. A
+                stored value the list does not contain is kept as an extra
+                option rather than silently dropped: the SDK's data could lag a
+                region, or a developer could have typed one by hand into the
+                credentials file, and either way saving this page must not
+                change a region that was working.
               %>
               <% if field.secret? %>
                 <%= render "sparrow_ui/console/secret_field",
@@ -208,6 +224,22 @@
                       hint: (stored[:hint] if stored.is_a?(Hash) && stored[:set]),
                       describedby: "#{field_id}_hint",
                       disabled: !@writable %>
+              <% elsif field.choices? %>
+                <% current = (typed || stored).to_s %>
+                <% listed = field.choices.any? { |value, _label| value.to_s == current } %>
+                <select id="<%= field_id %>"
+                        name="<%= card %>[settings][<%= choice.name %>][<%= field.name %>]"
+                        aria-describedby="<%= field_id %>_hint"
+                        <%= "disabled" unless @writable %>
+                        class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
+                  <option value="" <%= "selected" if current.empty? %>>Choose one</option>
+                  <% if !current.empty? && !listed %>
+                    <option value="<%= current %>" selected><%= current %></option>
+                  <% end %>
+                  <% field.choices.each do |value, label| %>
+                    <option value="<%= value %>" <%= "selected" if value.to_s == current %>><%= label %></option>
+                  <% end %>
+                </select>
               <% else %>
               <input type="text"
                      id="<%= field_id %>"
@@ -219,6 +251,11 @@
                      class="mt-1 block w-full rounded-md border border-slate-500 bg-slate-100 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-800">
               <% end %>
               <p id="<%= field_id %>_hint" class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                <%# What the value is, in the adapter's words, ahead of where
+                    it is kept, which is the console's. %>
+                <% if field.hint %>
+                  <%= field.hint %>
+                <% end %>
                 <% if !field.secret? %>
                   Stored in plain text alongside the rest of your credentials.
                 <% elsif stored.is_a?(Hash) && stored[:set] %>

@@ -14,11 +14,19 @@ module SparrowMail
     # Amazon SES, via the v2 API.
     #
     #   config.adapter  = :ses
-    #   config.settings = {region: "us-east-1"}
+    #   config.settings = {
+    #     region: "us-east-1",
+    #     access_key_id: ENV["AWS_ACCESS_KEY_ID"],          # optional
+    #     secret_access_key: ENV["AWS_SECRET_ACCESS_KEY"]   # optional
+    #   }
     #
-    # Credentials come from the AWS SDK's normal chain (environment, instance
-    # profile, shared config) unless `access_key_id` and `secret_access_key` are
-    # given explicitly.
+    # `region` is required and must be one where SES is offered; the control
+    # panel offers the list, taken from the AWS SDK's own region data. The two
+    # credentials are optional to the adapter: left out, the AWS SDK looks
+    # for them itself -- the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+    # environment variables, a shared profile in ~/.aws, or an instance role
+    # -- which is the right answer in production. On a laptop with none of
+    # those, the panel is where they go, and a send with neither says so.
     #
     # This adapter posts the message as raw MIME rather than rebuilding it as a
     # structured payload. SES accepts that, and it means attachments, encoding
@@ -44,6 +52,42 @@ module SparrowMail
       adapter_name :ses
       display_name "Amazon SES"
       required_settings :region
+      optional_settings :access_key_id, :secret_access_key
+
+      # The partition data's own name for the service this adapter calls.
+      # `Aws::Partitions::Region#services` lists what each region offers, and
+      # this is the key it lists SES v2 under.
+      PARTITION_SERVICE = "SESV2"
+
+      # The regions where SES v2 is offered, as `[value, label]` pairs for a
+      # dropdown: `["us-east-1", "us-east-1 · US East (N. Virginia)"]`.
+      #
+      # Read from the aws-partitions gem, which the SDK carries and keeps
+      # current, rather than typed out here. A list in this file would be
+      # right on the day it was written and wrong the next time Amazon opened
+      # a region, and nothing would say so. GovCloud and the sovereign cloud
+      # are in the list because SES is in them; an application that sends
+      # from one is not an edge case to be second-guessed here.
+      def self.setting_choices(name)
+        return nil unless name.to_sym == :region
+
+        @region_choices ||= Aws.partitions.flat_map do |partition|
+          partition.regions.select { |region| region.services.include?(PARTITION_SERVICE) }
+        end.map { |region| [region.name, "#{region.name} · #{region.description}"] }
+      end
+
+      def self.setting_hint(name)
+        case name.to_sym
+        when :region
+          "The region your sending domain or address is verified in. " \
+            "Sending from any other region is refused by SES."
+        when :access_key_id, :secret_access_key
+          "From an IAM user allowed to send through SES. Leave both blank only if " \
+            "the AWS SDK can already find credentials on its own: the AWS_ACCESS_KEY_ID " \
+            "and AWS_SECRET_ACCESS_KEY environment variables, a profile in ~/.aws, or " \
+            "an instance role."
+        end
+      end
 
       # SES exception names that mean something more specific than their HTTP
       # status does. Nearly everything SES rejects comes back as a 400, so the
@@ -91,7 +135,15 @@ module SparrowMail
           provider_message: Redactor.provider_message(e.class.name, envelope: envelope),
           recipients: envelope.all_recipients.size
         )
-      rescue Aws::Errors::MissingCredentialsError, Aws::Errors::MissingRegionError => e
+      rescue Aws::Errors::MissingCredentialsError
+        # The panel's two credential boxes were left blank and the SDK found
+        # nothing either. Naming both places is the whole point: the exception
+        # class alone told a developer nothing about where to put a key.
+        raise ConfigurationError,
+          "the ses adapter has no AWS credentials. Enter an access key ID and " \
+          "secret access key in the control panel, or set AWS_ACCESS_KEY_ID and " \
+          "AWS_SECRET_ACCESS_KEY where the AWS SDK will find them."
+      rescue Aws::Errors::MissingRegionError => e
         raise ConfigurationError, "the ses adapter is not configured: #{e.class}"
       rescue Aws::Errors::ServiceError => e
         raise service_error(e, envelope)

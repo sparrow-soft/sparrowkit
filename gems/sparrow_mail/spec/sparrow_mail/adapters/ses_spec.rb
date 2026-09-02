@@ -44,6 +44,17 @@ RSpec.describe SparrowMail::Adapters::SES do
       expect(adapter.send(:client_options)).not_to have_key(:credentials)
     end
 
+    # The SDK raises this at send time, once it has looked everywhere it
+    # knows and found nothing. The adapter's job is to say where a developer
+    # can put a key -- the class name alone said only that one was missing.
+    it "says where credentials go when neither the settings nor the SDK have any" do
+      adapter = described_class.new(region: "eu-west-1")
+      allow(adapter).to receive(:client).and_raise(Aws::Errors::MissingCredentialsError)
+
+      expect { adapter.deliver!(SparrowMail::Conformance.build_message) }
+        .to raise_error(SparrowMail::ConfigurationError, /control panel.*AWS_ACCESS_KEY_ID/m)
+    end
+
     it "posts the message as raw MIME rather than rebuilding it" do
       deliver
 
@@ -180,6 +191,67 @@ RSpec.describe SparrowMail::Adapters::SES do
     it "reports a missing region as a configuration problem, not a delivery failure" do
       expect { described_class.new(region: "  ") }
         .to raise_error(SparrowMail::ConfigurationError)
+    end
+  end
+
+  # What the control panel asks for. The region is the one thing the adapter
+  # cannot do without; the two credentials are declared so the panel offers a
+  # box for them, but stay optional because the SDK finds them on its own from
+  # the environment or an instance role, which is how production should work.
+  describe "what it asks the control panel for" do
+    it "requires only the region" do
+      expect(described_class.required_settings).to eq([:region])
+    end
+
+    it "asks for, but does not insist on, the two credentials" do
+      expect(described_class.optional_settings).to eq([:access_key_id, :secret_access_key])
+    end
+
+    describe "the region list" do
+      let(:choices) { described_class.setting_choices(:region) }
+
+      it "is the regions where SES is offered, from the SDK's own data" do
+        expected = Aws.partitions.flat_map do |partition|
+          partition.regions.select { |region| region.services.include?("SESV2") }.map(&:name)
+        end
+
+        expect(choices.map(&:first)).to eq(expected)
+        expect(choices.map(&:first)).to include("us-east-1", "eu-west-1")
+      end
+
+      it "leaves out a region that has no SES" do
+        # Every region carries S3; not every region carries SES. A list that
+        # matched the partition data's full set of regions would be the
+        # wrong list, and this is the assertion that tells them apart.
+        every_region = Aws.partitions.flat_map { |partition| partition.regions.map(&:name) }
+
+        expect(choices.size).to be < every_region.size
+      end
+
+      it "labels each one with the place, so a person can pick without a lookup" do
+        label = choices.to_h.fetch("us-east-1")
+
+        expect(label).to include("us-east-1")
+        expect(label).to include("N. Virginia")
+      end
+
+      it "lists values a person can type into a Hash literal, and nothing exotic" do
+        choices.each do |value, label|
+          expect(value).to match(/\A[a-z]{2,4}-[a-z-]+-\d\z/)
+          expect(label).not_to be_empty
+        end
+      end
+    end
+
+    it "offers no list for anything but the region" do
+      expect(described_class.setting_choices(:access_key_id)).to be_nil
+      expect(described_class.setting_choices(:secret_access_key)).to be_nil
+    end
+
+    it "explains each setting, and says when the credentials may be left blank" do
+      expect(described_class.setting_hint(:region)).to include("verified")
+      expect(described_class.setting_hint(:access_key_id)).to include("Leave both blank only if")
+      expect(described_class.setting_hint(:secret_access_key)).to include("AWS_SECRET_ACCESS_KEY")
     end
   end
 end
