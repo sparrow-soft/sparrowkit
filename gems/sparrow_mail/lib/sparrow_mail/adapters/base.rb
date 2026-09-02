@@ -92,6 +92,56 @@ module SparrowMail
           @required_settings || []
         end
 
+        # Settings the adapter needs a value for, and finds on its own when
+        # none is given. Not checked at construction, because the value may
+        # arrive by another route; shown on the control panel without the
+        # "Optional" mark, because a blank box is not the same as no value.
+        #
+        # Amazon SES is the reason this exists. Its credentials are necessary
+        # for a send, and the AWS SDK looks for them itself -- environment,
+        # shared profile, instance role -- before giving up. An adapter that
+        # insisted on them would refuse to boot on the production deployment
+        # that is doing it right, with a role and no key stored anywhere. A
+        # developer setting up on a laptop still has to put them somewhere,
+        # and until this existed the panel offered no box.
+        #
+        # The order given here is the order the panel shows them in.
+        def fallback_settings(*names)
+          @fallback_settings = names.map(&:to_sym) unless names.empty?
+          @fallback_settings || []
+        end
+
+        # Settings the adapter reads when they are present and has no need
+        # of when they are not. Not checked at construction, and marked
+        # "Optional" on the control panel, which is the one thing on a card
+        # of identical boxes that tells a developer they can stop. Declared
+        # so the panel can ask for them: a setting that is only ever
+        # mentioned in a doc comment is one a developer has to know to go and
+        # type into the credentials file by hand.
+        def optional_settings(*names)
+          @optional_settings = names.map(&:to_sym) unless names.empty?
+          @optional_settings || []
+        end
+
+        # The values a setting may take, when it is one of a known set: an
+        # array of `[value, label]` pairs, or nil for a setting that is typed
+        # freely. The control panel renders a dropdown for the former and a
+        # text box for the latter, and keeps no list of its own. Asked of the
+        # adapter, because the adapter is what knows -- SES answers with the
+        # regions where the service is offered, taken from the AWS SDK's own
+        # data rather than typed out somewhere that would go stale.
+        def setting_choices(_name)
+          nil
+        end
+
+        # A sentence beside a setting's box, or nil. The panel already says
+        # where a value is stored; this is for what the value *is* -- the sort
+        # of thing a developer setting up a provider for the first time would
+        # otherwise open the provider's documentation to find out.
+        def setting_hint(_name)
+          nil
+        end
+
         # True when the provider has a sandbox of its own that we can switch on
         # per request. Adapters that say true still make the request in sandbox
         # mode, which exercises the full path; adapters that say false are

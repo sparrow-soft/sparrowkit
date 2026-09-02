@@ -20,12 +20,51 @@ module SparrowMail
       # from adapters nobody here has read.
       ACRONYMS = %w[api dns id ip smtp ssl tls uri url].freeze
 
-      # One setting an adapter requires, as the form renders it.
+      # One setting an adapter asks for, as the form renders it.
+      #
+      # Everything here beyond the name is the adapter's answer, passed
+      # through: how much the setting is needed, the values it may take, and
+      # a sentence about what it is. The console adds nothing of its own, so a
+      # provider's dropdown or hint changes when the adapter does and not when
+      # somebody remembers to edit a view.
       class Field
-        attr_reader :name
+        # How much the adapter needs the setting, in the adapter's own three
+        # words: `:required` it refuses to build without, `:fallback` it
+        # finds elsewhere when the box is blank, `:optional` it has no need
+        # of. Only the last is marked "Optional" on the panel. A fallback
+        # setting is not optional -- Amazon SES cannot send without
+        # credentials -- it is one whose blank box might be right, and the
+        # hint beside it says when.
+        KINDS = %i[required fallback optional].freeze
 
-        def initialize(name)
+        attr_reader :name, :kind, :choices, :hint
+
+        def initialize(name, kind: :required, choices: nil, hint: nil)
+          raise ArgumentError, "unknown kind #{kind.inspect}" unless KINDS.include?(kind)
+
           @name = name.to_sym
+          @kind = kind
+          @choices = choices
+          @hint = hint
+        end
+
+        # True for a setting the adapter refuses to build without.
+        def required?
+          kind == :required
+        end
+
+        # True for a setting the adapter has no need of. This, and only
+        # this, is what the panel marks -- the marker is what tells a
+        # developer they can stop, so it must not appear beside a box whose
+        # value is needed and merely might come from somewhere else.
+        def optional?
+          kind == :optional
+        end
+
+        # True when the adapter listed the values this setting may take, in
+        # which case the panel renders a dropdown rather than a text box.
+        def choices?
+          !choices.nil? && !choices.empty?
         end
 
         # :api_key -> "API key". Derived rather than looked up, because these
@@ -173,7 +212,7 @@ module SparrowMail
         Choice.new(
           name: name,
           display_name: klass.display_name,
-          fields: klass.required_settings.map { |setting| Field.new(setting) },
+          fields: fields_for(klass),
           identity_fields: klass.identity_settings.map { |setting| Field.new(setting) },
           reputation_bearing: klass.reputation_bearing?,
           provider: klass.provider?
@@ -186,6 +225,24 @@ module SparrowMail
           name: name,
           display_name: SparrowMail.registry.display_name_for(name),
           unavailable_reason: e.message
+        )
+      end
+
+      # Every setting the adapter asks for -- required first, then the ones
+      # it can find elsewhere, then the ones it works without -- each
+      # carrying what the adapter says about it.
+      def fields_for(klass)
+        Field::KINDS.flat_map do |kind|
+          klass.public_send(:"#{kind}_settings").map { |setting| field_for(klass, setting, kind: kind) }
+        end
+      end
+
+      def field_for(klass, setting, kind:)
+        Field.new(
+          setting,
+          kind: kind,
+          choices: klass.setting_choices(setting),
+          hint: klass.setting_hint(setting)
         )
       end
     end

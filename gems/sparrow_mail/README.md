@@ -100,6 +100,29 @@ changing provider in a deployed application is a new value for
 `SPARROW_MAIL_ADAPTER` and a new credential, not a deploy of changed code.
 Values set in code win over the environment.
 
+### Amazon SES
+
+SES needs one more gem, because the AWS SDK is large and an application sending
+through Postmark has no reason to carry it:
+
+```ruby
+gem "aws-sdk-sesv2"
+```
+
+With that in place the control panel asks for everything else. The region is a
+dropdown of the regions where SES is offered, read from the SDK's own data, so
+it is current whenever the SDK is. Pick the one your sending domain or address
+is verified in; SES refuses mail from any other.
+
+The access key ID and secret access key are needed for every send, but the
+adapter does not insist on them at boot, because the AWS SDK can find
+credentials on its own: the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+environment variables, a profile in `~/.aws`, or an instance role. That is the
+right arrangement in production, where a role beats a stored key, and an
+adapter that demanded a key would refuse to start there. On a laptop with none
+of those, type them into the panel. A send with neither raises
+`ConfigurationError` and says so, naming both places.
+
 ## Sending
 
 Through ActionMailer, as normal — nothing about your mailers changes. Or

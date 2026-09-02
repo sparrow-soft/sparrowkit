@@ -36,10 +36,35 @@ RSpec.describe SparrowMail::Console::Adapters do
       expect(described_class.find(:preview)).not_to be_provider
     end
 
-    it "takes each adapter's fields from that adapter" do
+    it "takes each adapter's fields from that adapter, required ones first" do
       described_class.all.each do |choice|
+        klass = SparrowMail.registry.fetch(choice.name)
+
         expect(choice.fields.map(&:name))
-          .to eq(SparrowMail.registry.fetch(choice.name).required_settings)
+          .to eq(klass.required_settings + klass.fallback_settings + klass.optional_settings)
+      end
+    end
+
+    it "says of each field how much the adapter needs it" do
+      described_class.all.each do |choice|
+        klass = SparrowMail.registry.fetch(choice.name)
+        by_kind = choice.fields.group_by(&:kind).transform_values { |fields| fields.map(&:name) }
+
+        expect(by_kind.fetch(:required, [])).to eq(klass.required_settings)
+        expect(by_kind.fetch(:fallback, [])).to eq(klass.fallback_settings)
+        expect(by_kind.fetch(:optional, [])).to eq(klass.optional_settings)
+      end
+    end
+
+    # The mark is what tells a developer they can stop. A setting the adapter
+    # finds elsewhere when the box is blank is not one they can stop at, so
+    # it is not optional, whatever the construction-time check says.
+    it "marks as optional only the fields an adapter has no need of" do
+      described_class.all.each do |choice|
+        klass = SparrowMail.registry.fetch(choice.name)
+
+        expect(choice.fields.select(&:optional?).map(&:name)).to eq(klass.optional_settings)
+        expect(choice.fields.select(&:required?).map(&:name)).to eq(klass.required_settings)
       end
     end
 
@@ -86,6 +111,63 @@ RSpec.describe SparrowMail::Console::Adapters do
 
       expect(choice.fields.map(&:name)).to eq([:loft, :ring_id])
       expect(choice.fields.map(&:label)).to eq(["Loft", "Ring ID"])
+    end
+
+    # The same argument, for everything a field carries beyond its name. An
+    # adapter that says which values a setting may take, or what a setting
+    # is, gets a dropdown and a sentence on the panel without the panel
+    # knowing the adapter exists.
+    it "passes through what an adapter says about each of its settings" do
+      pigeon = Class.new(SparrowMail::Adapters::Base) do
+        adapter_name :homing_pigeon
+        required_settings :loft
+        fallback_settings :handler
+        optional_settings :ring_id
+
+        def self.setting_choices(name)
+          [["north", "North loft"], ["south", "South loft"]] if name == :loft
+        end
+
+        def self.setting_hint(name)
+          case name
+          when :handler then "Whoever is on duty, if this is blank."
+          when :ring_id then "Stamped on the bird's leg."
+          end
+        end
+      end
+      SparrowMail.register_adapter(:homing_pigeon, pigeon)
+
+      loft, handler, ring = described_class.find(:homing_pigeon).fields
+
+      expect(loft).to be_required
+      expect(loft).to be_choices
+      expect(loft.choices).to eq([["north", "North loft"], ["south", "South loft"]])
+      expect(loft.hint).to be_nil
+
+      expect(handler.kind).to eq(:fallback)
+      expect(handler).not_to be_required
+      expect(handler).not_to be_optional
+      expect(handler.hint).to eq("Whoever is on duty, if this is blank.")
+
+      expect(ring).to be_optional
+      expect(ring).not_to be_choices
+      expect(ring.hint).to eq("Stamped on the bird's leg.")
+    end
+
+    it "refuses a kind of need it does not have a word for" do
+      expect { SparrowMail::Console::Adapters::Field.new(:loft, kind: :whenever) }
+        .to raise_error(ArgumentError, /whenever/)
+    end
+
+    # A plain adapter says nothing about its settings, and the panel renders
+    # a required text box for each. That is the whole of what an adapter has
+    # to do, and the reason the base class answers nil for both questions.
+    it "asks nothing more of an adapter that only names its settings" do
+      described_class.find(:postmark).fields.each do |field|
+        expect(field).to be_required
+        expect(field).not_to be_choices
+        expect(field.hint).to be_nil
+      end
     end
   end
 

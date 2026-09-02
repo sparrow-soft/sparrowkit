@@ -300,6 +300,12 @@ module SparrowUi
       # Subtrees merge into subtrees rather than replacing them, so a panel can
       # save one section without restating the others, and `nil` deletes.
       #
+      # A subtree with nothing stored beneath it merges into an empty one,
+      # for the same reason: `nil` means "not this key", and a first save of a
+      # section used to write it out as `access_key_id:` with nothing after
+      # the colon. Harmless to the code that reads it back and untidy in a
+      # file a developer opens to check what the panel did.
+      #
       # `stored` is never mutated: it comes from Rails' memoised credentials
       # tree, and writing into it would leave the process holding a
       # configuration that is not on disk.
@@ -307,8 +313,8 @@ module SparrowUi
         attributes.each_with_object(stored.dup) do |(key, value), out|
           if value.nil?
             out.delete(key)
-          elsif value.is_a?(Hash) && out[key].is_a?(Hash)
-            out[key] = deep_merge(out[key], value)
+          elsif value.is_a?(Hash)
+            out[key] = deep_merge(out[key].is_a?(Hash) ? out[key] : {}, value)
           else
             out[key] = value
           end

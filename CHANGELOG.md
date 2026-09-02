@@ -7,6 +7,32 @@ released in lockstep at one version.
 
 ## Unreleased
 
+### Added
+
+- The control panel asks for everything Amazon SES needs. The region is a
+  dropdown of the regions where SES is offered, read from the AWS SDK's own
+  partition data rather than a list kept here, and the access key ID and
+  secret access key have boxes of their own, with a hint saying when leaving
+  them blank is right: only when the SDK already has credentials from the
+  environment, a profile or an instance role. Before, the panel offered one
+  text box for the region and nowhere to put a key.
+- Adapters can say more about their settings. `Adapters::Base` gains
+  `fallback_settings` (needed, but found elsewhere when not given),
+  `optional_settings` (not needed), `setting_choices(name)` and
+  `setting_hint(name)`. The panel renders a dropdown for a setting with
+  choices, marks optional ones and only those, and shows an adapter's hint
+  beside its box. An adapter that declares none of them renders exactly as
+  before. The panel still keeps no list of providers.
+- A send through SES with no credentials anywhere now raises
+  `ConfigurationError` naming both places a key can go, instead of the SDK's
+  exception class and nothing else.
+
+### Fixed
+
+- The first save of a control panel section no longer writes keys the panel
+  meant to leave out as `key:` with nothing after the colon. `nil` now means
+  "not this key" whether or not the section already existed.
+
 ## 1.1.0 - 2026-08-27
 
 ### Added

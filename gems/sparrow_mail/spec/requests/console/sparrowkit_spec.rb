@@ -656,6 +656,164 @@ RSpec.describe "the mail control panel", type: :request do
     end
   end
 
+  # Amazon SES is named here because the behaviour under test is a setting
+  # with a known set of values and settings an adapter can find elsewhere,
+  # and SES is the one shipped adapter that has both. The panel itself still
+  # knows nothing about it: the region list and the hints come from the
+  # adapter class, through SparrowMail::Console::Adapters.
+  describe "a provider whose adapter says more about its settings" do
+    let(:ses) { SparrowMail.registry.fetch(:ses) }
+
+    def ses_field(body, card, setting)
+      body[/<(select|input)[^>]*id="mail_#{card}_ses_#{setting}"[^>]*>/m]
+    end
+
+    it "renders a dropdown for a setting whose values the adapter listed" do
+      get PANEL
+
+      expect(ses_field(response.body, :primary, :region)).to start_with("<select")
+      expect(ses_field(response.body, :secondary, :region)).to start_with("<select")
+    end
+
+    it "offers every region the adapter names, and only those" do
+      get PANEL
+
+      primary = response.body[/id="mail_primary_ses_region".*?<\/select>/m]
+      offered = primary.scan(/<option value="([^"]*)"/).flatten.reject(&:empty?)
+
+      expect(offered).to eq(ses.setting_choices(:region).map(&:first))
+      expect(primary).to include("N. Virginia")
+    end
+
+    it "starts with nothing chosen rather than defaulting to a region" do
+      # A default of us-east-1 would be right for a lot of people and silently
+      # wrong for the rest, and SES refuses a send from the wrong region with
+      # an error about an unverified identity -- nowhere near the actual cause.
+      get PANEL
+
+      expect(response.body).to match(/id="mail_primary_ses_region".*?<option value="" selected>/m)
+    end
+
+    it "asks for the credentials the adapter does not insist on" do
+      get PANEL
+
+      expect(response.body).to include(%(name="primary[settings][ses][access_key_id]"))
+      expect(response.body).to include(%(name="primary[settings][ses][secret_access_key]"))
+    end
+
+    it "does not call them optional, because a send cannot do without them" do
+      # The SDK may already have credentials from the environment, which is
+      # why the adapter builds without them; that is not the same as a
+      # developer being free to skip the box, which is what "Optional" says.
+      # The hint beneath the box is where the blank-is-fine case is explained.
+      get PANEL
+
+      %i[region access_key_id secret_access_key].each do |setting|
+        label = response.body[/<label for="mail_primary_ses_#{setting}".*?<\/label>/m]
+
+        expect(label).not_to include("Optional")
+      end
+    end
+
+    it "marks a setting optional when an adapter says it has no need of it" do
+      pigeon = Class.new(SparrowMail::Adapters::Base) do
+        adapter_name :racing_pigeon
+        required_settings :loft
+        optional_settings :ring_id
+      end
+      SparrowMail.register_adapter(:racing_pigeon, pigeon)
+
+      get PANEL
+
+      ring = response.body[/<label for="mail_primary_racing_pigeon_ring_id".*?<\/label>/m]
+      loft = response.body[/<label for="mail_primary_racing_pigeon_loft".*?<\/label>/m]
+
+      expect(ring).to include("Optional")
+      expect(loft).not_to include("Optional")
+    end
+
+    it "masks both credentials, the way it masks any other key" do
+      # sparrow_ui's secret field: a text box masked in CSS, never a
+      # `type="password"`, which is what would make a browser offer to save an
+      # AWS key into the developer's password manager.
+      get PANEL
+
+      %i[access_key_id secret_access_key].each do |setting|
+        field = ses_field(response.body, :primary, setting)
+
+        expect(field).to start_with("<input")
+        expect(field).to include("-webkit-text-security:disc")
+        expect(field).not_to include('type="password"')
+      end
+    end
+
+    it "shows the adapter's own sentence about a setting" do
+      get PANEL
+
+      expect(response.body).to include("Needed unless the AWS SDK already has credentials")
+    end
+
+    it "saves the region and both credentials" do
+      patch PANEL, params: {
+        handles: "both",
+        sender_name: "", sender_email: "",
+        primary: {adapter: "ses", settings: {ses: {
+          region: "eu-west-1", access_key_id: "AKIAEXAMPLE", secret_access_key: "s3cr3t"
+        }}}
+      }
+
+      expect(response).to have_http_status(:found)
+      expect(stored[:transactional]).to eq(
+        adapter: "ses", region: "eu-west-1", access_key_id: "AKIAEXAMPLE", secret_access_key: "s3cr3t"
+      )
+    end
+
+    it "saves the region alone, leaving credentials to the AWS SDK" do
+      patch PANEL, params: {
+        handles: "both",
+        sender_name: "", sender_email: "",
+        primary: {adapter: "ses", settings: {ses: {region: "eu-west-1", access_key_id: "", secret_access_key: ""}}}
+      }
+
+      expect(stored[:transactional]).to eq(adapter: "ses", region: "eu-west-1")
+    end
+
+    it "keeps stored credentials when the boxes are left blank on a later save" do
+      ConsoleCredentials.reset!(sparrow_mail: {
+        transactional: {adapter: "ses", region: "eu-west-1", access_key_id: "AKIAEXAMPLE", secret_access_key: "s3cr3t"}
+      })
+
+      patch PANEL, params: {
+        handles: "both",
+        sender_name: "", sender_email: "",
+        primary: {adapter: "ses", settings: {ses: {region: "eu-west-2", access_key_id: "", secret_access_key: ""}}}
+      }
+
+      expect(stored[:transactional]).to eq(
+        adapter: "ses", region: "eu-west-2", access_key_id: "AKIAEXAMPLE", secret_access_key: "s3cr3t"
+      )
+    end
+
+    it "selects the stored region" do
+      ConsoleCredentials.reset!(sparrow_mail: {transactional: {adapter: "ses", region: "eu-west-1"}})
+
+      get PANEL
+
+      expect(response.body).to match(/id="mail_primary_ses_region".*?<option value="eu-west-1" selected>/m)
+    end
+
+    it "keeps a stored region the list does not know, so saving cannot change it" do
+      # Typed by hand into the credentials file, or newer than the SDK's data.
+      # Either way it was working, and a page that quietly replaced it with
+      # "Choose one" would have a save button that breaks mail.
+      ConsoleCredentials.reset!(sparrow_mail: {transactional: {adapter: "ses", region: "xx-moon-1"}})
+
+      get PANEL
+
+      expect(response.body).to match(/id="mail_primary_ses_region".*?<option value="xx-moon-1" selected>xx-moon-1</m)
+    end
+  end
+
   describe "when credentials cannot be written" do
     before { ConsoleCredentials.without_key! }
 

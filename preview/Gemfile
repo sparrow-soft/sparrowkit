@@ -33,3 +33,8 @@ gem "sparrow_ui", path: "../gems/sparrow_ui"
 gem "sparrow_auth", path: "../gems/sparrow_auth"
 gem "sparrow_mail", path: "../gems/sparrow_mail"
 gem "sparrow_pay", path: "../gems/sparrow_pay"
+
+# The one adapter that needs a gem of its own. Without it the Mail panel lists
+# Amazon SES as "needs one more gem" and its card -- the region dropdown and
+# the two credential boxes -- has nowhere to be looked at.
+gem "aws-sdk-sesv2", "~> 1.60"
