@@ -7,6 +7,8 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.4.0 - 2026-09-08
+
 ### Fixed
 
 - An organization can be made into a customer at all. Pay reads the customer's
