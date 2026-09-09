@@ -14,6 +14,8 @@ Your application talks to Pay directly. There is no wrapper here to learn.
 organization.payment_processor              # Pay's customer object
 organization.payment_processor.subscribed?  # Pay's API, documented by Pay
 organization.billing_email                  # an owner's address, for receipts
+organization.email                          # the same address; the name Pay reads
+organization.sync_billing_details           # push both to the processor
 ```
 
 The organization is the customer, never a single person. Somebody can belong to
@@ -23,8 +25,11 @@ walks out of the door with them.
 `SparrowPay::Billable` is included into `SparrowAuth::Organization` by the
 engine, automatically. Do not include it yourself, and never include it in an
 account model — making the wrong wiring impossible is the guarantee, rather than
-a convention somebody has to remember. It also defines `pay_customer_name` and
-`pay_customer_email`, which Pay asks the billable model for; leave those alone.
+a convention somebody has to remember. It also defines `pay_customer_name`,
+which Pay asks the billable model for, and `email`, which Pay does not ask for
+at all -- `Pay::Customer` delegates `email` to its owner, and every processor
+builds its customer record from that. An organization with no `email` cannot be
+made into a customer. Leave both alone.
 
 Everything else — what plan someone is on, whether they are past due, when they
 renew — you ask Pay.
@@ -89,9 +94,15 @@ organization.payment_processor.charges
 See [Pay's documentation](https://github.com/pay-rails/pay) for the rest.
 
 sparrow_pay adds exactly three things on top: the organization is the customer
-rather than a person, `billing_email` follows ownership rather than whoever set
-the subscription up, and the control panel stores your processor's API keys
-without you editing a file.
+rather than a person, `billing_email` is the address of the account that created
+the organization and moves only when ownership does, and the control panel
+stores your processor's API keys without you editing a file.
+
+The processor's copy of that address is kept current for you -- a seat changing
+hands, the billing account correcting its own address, or a rename all sync
+through Pay's own job, and only for an organization that already has a customer
+at the processor. Call `organization.sync_billing_details` yourself if your
+application moves the receipts by some rule of its own.
 
 **The control panel does that and nothing else.** Choose a processor, enter its
 keys. It holds no settings of its own beyond that, on purpose: a setting that

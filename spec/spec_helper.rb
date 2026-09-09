@@ -75,7 +75,8 @@ REMOVED_APIS = {
   "SparrowAuth::Grant" => "deleted in 0.1.0",
   "sparrowkit:screens" => "SparrowKit ships no screens",
   "sparrowkit:resource" => "the generator was removed",
-  "organization.billing." => "there is no billing object; ask Pay"
+  "organization.billing." => "there is no billing object; ask Pay",
+  "pay_customer_email" => "Pay never asked for it; it reads organization.email"
 }.freeze
 
 # Everything a developer or an agent reads, taken from the gemspecs themselves.

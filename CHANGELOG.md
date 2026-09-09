@@ -7,6 +7,41 @@ released in lockstep at one version.
 
 ## Unreleased
 
+### Fixed
+
+- An organization can be made into a customer at all. Pay reads the customer's
+  address by delegating `email` to the billable model, which
+  `SparrowAuth::Organization` did not define, so the first attempt to create a
+  customer raised `NoMethodError` on every processor -- Stripe, Paddle, Lemon
+  Squeezy and Braintree alike. `SparrowPay::Billable` now defines `email`,
+  returning `billing_email`.
+- `billing_email` falls back to the earliest **membership** rather than the
+  first row of `accounts`, which is ordered by account id -- the order people
+  signed up in, not the order they joined. In an organization whose roles are
+  not called "owner", a colleague with an older account joining later quietly
+  took over the receipts.
+
+### Added
+
+- The processor's copy of the billing contact is kept current. A seat changing
+  hands, the billing account correcting its own address, and a rename each
+  enqueue Pay's `CustomerSyncJob`; none of the three is an update to the
+  organization row, so the callbacks are on memberships and accounts rather
+  than on the billable model, and Pay's own sync -- which watches for an email
+  column an organization does not have -- never fired at all.
+- `SparrowPay::Billable#sync_billing_details`, for an application that moves
+  the receipts by a rule of its own. It syncs only customers that already exist
+  at the processor: Pay's update opens one when there is no processor id, so an
+  unguarded sync would open an account at the processor for every organization
+  on the system.
+
+### Removed
+
+- `SparrowPay::Billable#pay_customer_email`. Pay never asked for it: it reads
+  `owner.email`, which is why nothing was reaching the processor. The README,
+  AGENTS.md and the control panel's guide all taught it as the hook Pay reads;
+  they now teach `email`.
+
 ## 1.3.0 - 2026-09-02
 
 ### Changed
@@ -133,6 +168,20 @@ released in lockstep at one version.
 
 - Both linters target Ruby 3.2, matching the gemspecs. `keyword_init: true` is
   redundant there and has been removed from the Structs that carried it.
+
+### Added
+
+- The processor's copy of the billing contact is kept current. A seat changing
+  hands, the billing account correcting its own address, and a rename each
+  enqueue Pay's `CustomerSyncJob`; none of the three is an update to the
+  organization row, so the callbacks are on memberships and accounts rather
+  than on the billable model, and Pay's own sync -- which watches for an email
+  column an organization does not have -- never fired at all.
+- `SparrowPay::Billable#sync_billing_details`, for an application that moves
+  the receipts by a rule of its own. It syncs only customers that already exist
+  at the processor: Pay's update opens one when there is no processor id, so an
+  unguarded sync would open an account at the processor for every organization
+  on the system.
 
 ### Removed
 

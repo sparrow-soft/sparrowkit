@@ -338,22 +338,60 @@ organization.payment_processor              # Pay's customer object
 organization.payment_processor.subscribed?  # Pay's API, documented by Pay
 organization.payment_processor.subscription
 organization.billing_email                  # where a receipt goes
+organization.email                          # the same address, under the name Pay reads
+organization.sync_billing_details           # push both to the processor
 ```
 
-`Billable` also defines `pay_customer_name` and `pay_customer_email` for you.
-Pay asks the billable model for those; do not override them.
+`Billable` also defines `pay_customer_name`, which Pay asks the billable model
+for, and `email`, which Pay never asks for at all: `Pay::Customer` delegates
+`email` to its owner, and every processor -- Stripe, Paddle, Lemon Squeezy,
+Braintree -- builds its customer record from that delegation. An organization
+with no `email` therefore cannot become a customer; the first attempt raises
+`NoMethodError`. Leave both alone.
 
 ### Where a receipt goes
 
-`billing_email` prefers an **owner** and falls back to any member, so an
-organization mid-handover still has somewhere to send a failed-payment notice —
-the moment it most needs one.
+`billing_email` is the address of the account that **created** the organization,
+and it changes only when ownership does: the earliest membership whose role is
+`"owner"`, falling back to the earliest membership of any role. The fallback is
+what leaves an organization mid-handover somewhere to send a failed-payment
+notice — the moment it most needs one. `organization.email` is the same address
+under the name Pay reads.
+
+Adding a second owner does not move the receipts, and neither does anybody
+joining later. If the founder's membership goes, the next-earliest owner takes
+it over.
 
 Note the coupling: "owner" here means a membership whose `role` is the literal
 string `"owner"`, via `Organization#owners`. This is the one place in SparrowKit
 where a role's *value* means something. If your application names its top role
-something else, `billing_email` falls through to the first member — still a real
-address, but not the one you probably intended.
+something else, `billing_email` falls through to the earliest member — which is
+still the person who set the organization up.
+
+### Keeping the processor's copy current
+
+The processor holds its own copy of the name and the address, taken when the
+customer was created, and that copy is what a receipt is actually sent to. It is
+updated for you — through Pay's own sync job — when a seat changes hands, when
+the billing account corrects its own address, or when the organization is
+renamed. None of those is an update to the organization row, which is why the
+callbacks live on memberships and accounts rather than on the billable model.
+
+**Only for an organization that already has a customer at the processor.** Pay's
+update opens one when there is none, so an unguarded sync would open an account
+at the processor for every organization on the system, the first time anybody
+was seated in one.
+
+If your application decides who pays by a rule of its own, say so after making
+the change:
+
+```ruby
+organization.sync_billing_details
+```
+
+The job is Pay's `CustomerSyncJob`, on whatever queue you have configured. If it
+fails — the processor is down, or the queue drops it — the processor keeps the
+address it had, and nothing retries beyond your queue's own policy.
 
 ### What does not exist
 
@@ -414,6 +452,7 @@ are real. Do not use them, and do not write code that assumes them:
 | `rails generate sparrowkit:resource` | Write the model yourself |
 | `current_membership`, `current_role` | Only `current_account` and `current_organization` exist |
 | `account.can?(...)`, `sparrow_auth_signed_in?` | Never existed; `current_account` is the check |
+| `pay_customer_email` | Pay never asked for it; it reads `organization.email`, which `Billable` defines |
 
 ## Working on SparrowKit itself
 

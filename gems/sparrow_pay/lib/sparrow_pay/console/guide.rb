@@ -28,7 +28,7 @@ module SparrowPay
         [
           "# The organization is the customer -- never an account\norganization.payment_processor",
           "# Pay's own API, from there\norganization.payment_processor.subscribed?\norganization.payment_processor.subscription",
-          "# Where a receipt goes: an owner, falling back to any member\norganization.billing_email"
+          "# Where a receipt goes: the account that created the organization\norganization.billing_email"
         ]
       end
 
@@ -53,11 +53,20 @@ module SparrowPay
           - `organization.payment_processor` -- Pay's customer object. Everything
             about subscriptions, charges and payment methods is Pay's API from
             here, and is documented by Pay.
-          - `organization.billing_email` -- where a receipt goes. Prefers a
-            membership whose role is the literal string "owner", falling back to
-            any member, so an organization mid-handover still has somewhere to
-            send a failed-payment notice. That is the one place in SparrowKit
-            where a role's value means anything.
+          - `organization.billing_email` -- where a receipt goes: the account
+            that created the organization, changing only when ownership does.
+            The earliest membership whose role is the literal string "owner",
+            falling back to the earliest membership of any role, so an
+            organization mid-handover still has somewhere to send a
+            failed-payment notice. That is the one place in SparrowKit where a
+            role's value means anything. `organization.email` is the same
+            address, under the name Pay reads.
+          - The processor's own copy of that address is updated when a seat
+            changes hands, when the billing account corrects its address, or
+            when the organization is renamed -- but only for an organization
+            that already has a customer at the processor. Call
+            `organization.sync_billing_details` if your application moves the
+            receipts by a rule of its own.
           - Plans, prices and product names are configured at the processor, not
             in this codebase. Do not create a Plan model.
 
