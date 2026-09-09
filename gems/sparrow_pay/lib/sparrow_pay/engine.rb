@@ -105,9 +105,16 @@ module SparrowPay
     # settles the question by construction: there is no way for an application
     # to accidentally make an account the customer, because the engine never
     # offers that.
+    #
+    # The two alongside it are what keeps the processor's copy of the billing
+    # contact current: neither a seat changing hands nor somebody correcting
+    # their own address touches the organization row, so a callback on the
+    # billable model cannot see either of them.
     initializer "sparrow_pay.billable" do
       ActiveSupport.on_load(:active_record) do
         SparrowAuth::Organization.include(SparrowPay::Billable)
+        SparrowAuth::Membership.include(SparrowPay::BillingContact::Membership)
+        SparrowAuth::Account.include(SparrowPay::BillingContact::Account)
       end
     end
   end
