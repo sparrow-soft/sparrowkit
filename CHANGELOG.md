@@ -7,6 +7,18 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.5.0 - 2026-09-11
+
+### Added
+
+- The development-only SparrowKit console can now target separate Development
+  and Production encrypted credential stores. Target selection is server-side
+  allow-listed and fails closed, so an invalid target cannot read or write a
+  credential store.
+- Production-target console use permits configuration saves only. Provider,
+  test, sign-in, delivery, payment, webhook, and other execution actions are
+  unavailable in the interface and rejected by the server.
+
 ## 1.4.0 - 2026-09-08
 
 ### Fixed
