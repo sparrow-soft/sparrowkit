@@ -25,26 +25,26 @@
 
 ## Phase 3 — Shared Tab Interface (Agent: ui-engineer)
 
-- [ ] Add the shared accessible Development/Production tabs to the console
+- [x] Add the shared accessible Development/Production tabs to the console
   layout and preserve the selected target through all console navigation,
   forms, validation failures, and redirects.
-- [ ] Make Production visibly configuration-save-only and remove/disable every
+- [x] Make Production visibly configuration-save-only and remove/disable every
   execution affordance while relying on the server-side block as enforcement.
-- [ ] Test keyboard operation and the 375px mobile layout; record the UI
+- [x] Test keyboard operation and the 375px mobile layout; record the UI
   evidence and a handoff to ux-designer.
 
 ## Phase 4 — UX Review (Agent: ux-designer)
 
-- [ ] Review the target-selection and save-only flow at 375px first, including
+- [x] Review the target-selection and save-only flow at 375px first, including
   keyboard navigation, labels, validation recovery, and the risk of selecting
   the wrong environment.
-- [ ] Write findings and disposition in `## UX Review`; hand off to ui-designer.
+- [x] Write findings and disposition in `## UX Review`; hand off to ui-designer.
 
 ## Phase 5 — UI Design Review (Agent: ui-designer)
 
-- [ ] Read `## UX Review` first, then review visual hierarchy, tab state,
+- [x] Read `## UX Review` first, then review visual hierarchy, tab state,
   responsive consistency, and the Production configuration-only treatment.
-- [ ] Write findings and disposition in `## UI Design Review` without changing
+- [x] Write findings and disposition in `## UI Design Review` without changing
   the UX review section.
 
 ## Handoff — Project Manager to Security Engineer
@@ -341,9 +341,57 @@ review.
 
 - Re-reviewed the remediated shared ERB and the UI remediation handoff. A live 375px/browser and assistive-technology pass could not be run: this workspace lacks the installed Rails/RSpec/standard executables and Tailwind executable, as recorded in the UI handoff. Run the planned phone-width keyboard/touch verification once dependencies are available; this is a test-environment limitation, not a remaining UX design blocker.
 
+### Release acceptance — live 375px review
+
+**Disposition: approved — no UX blockers.** The earlier browser limitation is
+now resolved by the recorded real-Chromium pass against the Sparrow UI dummy
+host at a 375 × 812 CSS-pixel viewport.
+
+- **Mobile targets and context:** The `Credentials` label and both target
+  choices remained visible at phone width, with no horizontal overflow. Live
+  measurements were Development `112.55 × 44` CSS px and Production
+  `96.92 × 44` CSS px, meeting the 44px minimum touch target in each
+  dimension.
+- **Keyboard and selected-state feedback:** The native anchors reached and
+  activated Production with Tab then Enter; the focused Production anchor had
+  a visible browser outline, and the selected destination exposed
+  `aria-current="page"`. This makes the environment switcher operable without
+  pointer input and keeps its active state clear beyond color alone.
+- **Persistence and recovery:** In the live session, switching targets kept
+  the canonical target on Mail navigation and in the Mail save form's hidden
+  field. A target-free return to Mail recovered the previously selected target
+  from the browser session and regenerated target-carrying hub, panel, and
+  back links. That prevents a developer from silently returning to the other
+  credential store after navigation.
+- **Production save-only clarity:** The Production Mail screen visibly stated
+  “Production credentials: configuration saves only,” kept the clearly named
+  `Save mail settings` action available, and did not render the test-email or
+  mailbox-clear forms. The save path remains available while the tempting
+  execution actions are absent; approved request coverage separately verifies
+  direct-request refusal.
+
+### Release handoff
+
+**Next agent:** `ui-designer`.
+
+**Why:** The required UX release review has approved the live 375px target
+selection and Production save-only flow. UI design review may now assess the
+same released state without changing this UX section.
+
+<!-- HANDOFF TO ui-designer:
+     UX release disposition: APPROVED — no blockers.
+     Live evidence reviewed: Chromium 375 × 812; visible Credentials context;
+     112.55 × 44 and 96.92 × 44 target anchors; no horizontal overflow;
+     native Tab/Enter operation and visible focus; aria-current selected state;
+     session/link/form target persistence and target-free recovery; Production
+     Mail save-only notice, save action, and test/mailbox action suppression.
+     Open UX items: none blocking; existing optional unsaved-edit warning
+     suggestion remains non-blocking.
+     Clear to proceed: YES -->
+
 ## UI Design Review — Environment-Specific Credential Tabs
 
-### Disposition: approved
+### Disposition: approved — release visual review complete
 
 ### ✅ Approved
 
@@ -368,6 +416,59 @@ review.
 ### Test limitations
 
 - Reviewed the rendered-component source, shared layout, compiled console utilities, and the UX-approved remediation. ERB parsing and `git diff --check` are recorded as passing in the UI handoff. A live browser/assistive-technology check at 375px could not run because this workspace lacks the Rails/RSpec/standard/Tailwind executables and no local browser is installed. This is an environment limitation, not a remaining visual blocker.
+
+### Release acceptance — live 375px visual review
+
+**Disposition: approved — no UI design blockers.** Reviewed the UX-approved
+real-Chromium evidence from the Sparrow UI dummy host at a 375 × 812 CSS-pixel
+viewport, alongside the shared header and Production notice implementation.
+The earlier browser limitation is superseded for this release review.
+
+### ✅ Approved
+
+- **Hierarchy and context:** `Credentials` is a visible, medium-weight context
+  label immediately paired with the Development/Production control. It gives
+  the two compact choices a clear subject without competing with the
+  SparrowKit identity, version, panel navigation, or page heading.
+- **Active and inactive treatment:** The active target uses the console's
+  established slate-tinted surface with purple text; inactive targets stay
+  neutral slate. The selected state is therefore immediately scannable and
+  consistent with active module navigation, with the `aria-current="page"`
+  state tied to the same treatment rather than creating a second convention.
+- **Spacing and mobile fidelity:** Recorded browser measurements show
+  Development at `112.55 × 44` CSS px and Production at `96.92 × 44` CSS px.
+  The `px-3`/`py-3` rhythm makes the tab group comfortably tappable without
+  making the header visually heavy. At 375px the header wrapped cleanly and
+  document width remained exactly 375px, so no selector, navigation, or page
+  content overflowed horizontally.
+- **Production warning consistency:** The save-only boundary appears above
+  panel content in the existing amber warning-card treatment (amber border,
+  surface, and text), distinct from neutral information and destructive
+  errors. Its prominent heading, "Production credentials: configuration saves
+  only," makes the status clear while leaving `Save mail settings` as the
+  visually appropriate available action.
+
+### 🔧 Required Changes (must fix before merge)
+
+- None.
+
+### 💡 Suggestions (optional improvements)
+
+- Keep the recorded 375px header check in the release regression routine as
+  panels or documentation links are added; it protects the currently clean
+  wrap behavior without requiring a redesign.
+
+### Decision needed
+
+- None.
+
+### Release handoff
+
+**Next agent:** `project-manager`.
+
+**Why:** UX and UI design release reviews are approved, including the recorded
+live 375px evidence. The project manager can now assess the completed track
+against the full acceptance criteria and release gates.
 
 ## Final Security Verification
 
@@ -676,3 +777,195 @@ Verification passed:
      UI considerations: no UI contract changed; retain credential_target on console navigation and forms.
      Verification: complete root bundle exec rake gate passes, and no dummy credential/key files remain in git status after it.
      Next: ui-engineer may perform final UI integration checks; no UI-owned file was changed for this hygiene follow-up. -->
+
+## Release Acceptance Stage 1 — UI Live Validation
+
+### Disposition: PASS — no UI defect found
+
+Validated the completed target tabs in a real Chromium session against the
+Sparrow UI dummy Rails host at `127.0.0.1:4510`, using a 375 × 812 CSS-pixel
+viewport. This host mounts the shipped Sparrow UI and Mail console panels and
+uses the same target resolver, layout, and templates as the gem. A temporary,
+empty generated Production encrypted credential fixture was created only to
+exercise the available Production save-only screen, then removed. No provider,
+sign-in, delivery, payment, or other execution action was run.
+
+- **Visible context and mobile fit — PASS.** The header visibly labels the
+  selector `Credentials`; both Development and Production choices are visible
+  at 375px. Browser measurement reported a 375px document width for a 375px
+  viewport (no horizontal overflow). Visual inspection confirmed the header
+  wraps its controls cleanly rather than clipping or scrolling.
+- **Touch targets — PASS.** Live browser measurements were Development
+  `112.55 × 44` CSS px and Production `96.92 × 44` CSS px.
+- **Keyboard and focus — PASS.** Both choices are native anchors. Focusing
+  Development, pressing Tab, and pressing Enter selected Production. The next
+  focus was the Production anchor; its focused state was the browser-visible
+  `outline: auto 1px`. The selected target exposes `aria-current="page"`.
+- **Development and Production persistence — PASS.** Switching targets
+  retained the canonical target in the URL through Mail navigation and in the
+  Mail configuration form's hidden `credential_target` field. After each
+  selection, a target-free `/sparrowkit/mail` navigation recovered the correct
+  selected target from the browser session and generated target-carrying hub,
+  module, and back links. Development retained its test-mail affordance;
+  Production retained its save form with `credential_target=production`.
+- **Production save-only suppression — PASS.** With an available Production
+  store, the Mail panel rendered the status message “Production credentials:
+  configuration saves only” and an enabled `Save mail settings` action. The
+  live DOM contained no `Send a test email` heading, test-send form, or
+  mailbox-clear form. Server-side direct-request refusal remains independently
+  covered by the approved request suite recorded above.
+
+Temporary dummy credentials, the local browser session, screenshots, and
+Playwright traces were moved to Trash after validation. The worktree was clean
+after cleanup. No source, stylesheet, dependency, or product-flow change was
+made in this acceptance stage.
+
+<!-- HANDOFF TO ux-designer (release review):
+     Live views validated: Sparrow UI shared credential-target header; Hub and Mail panel under Development and Production
+     Viewport and method: Chromium at 375 × 812; native keyboard Tab/Enter; DOM, computed-size, focus, and navigation checks
+     Stimulus controllers: none
+     Bootstrap components used: none (existing Tailwind console)
+     Custom SCSS added: none
+     Mobile tested: YES — 375px
+     Evidence: visible Credentials context; 112.55 × 44 and 96.92 × 44 target anchors; no horizontal overflow; selected aria-current; session and link/form persistence for both targets; Production Mail shows configuration-save-only status, allows its save form, and renders no test-send or mailbox-clear action
+     Questions for designer: none; please perform the required release UX review before UI design review. -->
+
+**Next agent:** `ux-designer`.
+
+**Why:** UI live validation passed. UX must now perform the first release-review pass over the 375px target-selection and save-only flow before any UI design release review.
+
+## Project Manager Release Authorization
+
+### Acceptance criteria verification
+
+1. **Development and loopback boundary — verified.** The existing console gate
+   remains covered by the request suite; the final security re-verification
+   confirmed that Production selection does not alter it.
+2. **Shared accessible selection — verified.** Shared-layout/request coverage
+   proves target propagation and selected-state semantics. The live Chromium
+   review confirmed native keyboard operation, visible focus, `aria-current`,
+   form/link/session persistence, and no 375px overflow.
+3. **Target-isolated reads and writes — verified.** Target-bound Settings
+   service and request coverage prove Development and Production use only their
+   designated encrypted credential stores.
+4. **Fail-closed target validation — verified.** Request coverage proves
+   missing, forged, malformed, and unsupported target values reject without
+   opening or writing a store or echoing the supplied target.
+5. **Unavailable-store no-write behavior — verified.** Focused coverage proves
+   missing keys, unreadable files, invalid ciphertext, and encryption failures
+   leave both stores unchanged and expose only safe recovery text.
+6. **Secret and key safety — verified.** Security re-verification approved
+   target-bound Rails-compatible key resolution, request parameter filtering,
+   secret masking, safe error rendering, and regression canaries for logs,
+   responses, and flashes.
+7. **Production save-only boundary — verified.** Live UI review confirmed the
+   save-only notice and removed execution controls; request coverage proves
+   direct Auth and Mail execution requests receive a pre-side-effect 422.
+8. **Development compatibility — verified.** Auth, Mail, Pay, and Sparrow UI
+   regression suites prove explicit Development selection and target-free
+   navigation retain existing configuration behavior.
+9. **Automated coverage scope — verified.** The recorded request/service
+   coverage spans isolated stores, persistence, failure modes, masking,
+   execution refusal, the console gate, and CSRF protection.
+10. **Quality gate — verified.** The completed root `bundle exec rake` gate
+    passed all four gem suites, documentation checks, StandardRB, and
+    vocabulary checks. PR #16 also passed RuboCop, Brakeman, Bundler Audit,
+    CodeQL, lockstep-version, and gem-build CI checks.
+
+### Disposition: APPROVED FOR RELEASE PREPARATION
+
+Track 01 satisfies its acceptance criteria, security requirements, review
+sequence, and quality gate. The release is a backward-compatible feature
+release: **SparrowKit 1.5.0**. This authorization covers only release metadata
+and documentation; any functional change reopens the applicable specialist
+review before release.
+
+### Handoff — Project Manager to Software Engineer
+
+**Next agent:** `software-engineer`.
+
+**Why:** The feature is complete. Release preparation needs a lockstep version
+bump and release documentation, followed by the normal repository gate. No
+schema, UI, security, or product-scope work is authorized in this phase.
+
+**Required release artifacts:**
+
+- Set root `VERSION` to `1.5.0` and run `bundle exec rake version:sync` to
+  update all four generated gem `version.rb` files.
+- Move the release notes from `Unreleased` into a dated `1.5.0` changelog
+  entry. Describe separate Development/Production credential targets,
+  fail-closed selection, and Production's configuration-save-only boundary.
+- Change the pinned installation tag from `v1.4.0` to `v1.5.0` in the root
+  README, AGENTS.md, and each gem README.
+- Commit only the release metadata/documentation artifacts. Do not commit
+  built `.gem` files or generated test credentials.
+
+**Required verification and release sequence:**
+
+1. Run `bundle exec rake`, `bundle exec rake audit`, and `git diff --check`.
+2. Open a release-only PR to `main` and require the complete CI and Security
+   workflow suite, including gem builds, lockstep-version, RuboCop, Brakeman,
+   Bundler Audit, and CodeQL.
+3. After the PR is merged, have the repository maintainer create and push an
+   annotated `v1.5.0` tag at that merge commit. Do not run `gem push`; this
+   project releases through its Git tag and has no GitHub Release publication
+   convention to reproduce.
+
+<!-- HANDOFF TO software-engineer:
+     Release authorization: APPROVED FOR RELEASE PREPARATION.
+     Scope: VERSION, generated gem versions, CHANGELOG, and install-tag
+     documentation only. No functional changes.
+     Version: 1.5.0 (minor; backward-compatible feature).
+     Required gate: root rake, audit, diff check, then green release-only PR
+     CI/Security workflows before an annotated v1.5.0 tag is pushed.
+     Do not publish gems or commit generated artifacts. -->
+
+## Release Preparation — Software Engineer
+
+### Release artifacts
+
+- Set the root `VERSION` to `1.5.0` and generated all four lockstep gem
+  version files with `bundle exec rake version:sync`.
+- Added the dated `1.5.0` changelog entry covering separate Development and
+  Production credential targets, fail-closed target selection, and
+  Production's configuration-save-only boundary.
+- Updated every repository installation snippet from `v1.4.0` to `v1.5.0`:
+  root README, AGENTS.md, and the four gem READMEs.
+- Made no functional changes, tags, pushes, gem publications, or repository
+  `.gem` artifacts. Package builds were written outside the repository.
+
+### Verification
+
+- PASS — `bundle exec rake` (all four gem suites, lockstep/version, licence,
+  documentation, vocabulary, and StandardRB).
+- PASS — `bundle exec rake audit` (no vulnerabilities).
+- PASS — `bundle exec rubocop` (294 files, no offenses).
+- PASS — `bundle exec rake spec:docs`, `bundle exec rake version:check`, and
+  `git diff --check`.
+- PASS — established Brakeman scans:
+  `bundle exec brakeman --no-pager --force --quiet --exit-on-warn
+  gems/sparrow_auth` and the corresponding `gems/sparrow_ui` command (zero
+  warnings in each).
+- PASS — all four gemspecs built successfully at version `1.5.0` outside the
+  worktree.
+
+### Handoff — Software Engineer to Project Manager
+
+**Next agent:** `project-manager`.
+
+**Why:** Release-only metadata and documentation artifacts are complete and
+all local release checks pass. The project manager can open the release-only
+PR and require the recorded CI and Security workflows before the repository
+maintainer creates the annotated `v1.5.0` tag after merge.
+
+<!-- HANDOFF TO project-manager:
+     Release preparation: COMPLETE.
+     Changed artifacts: VERSION; generated version.rb files for sparrow_mail,
+     sparrow_auth, sparrow_pay, and sparrow_ui; CHANGELOG.md; root README;
+     AGENTS.md; all four gem READMEs.
+     Verification: root rake, audit, RuboCop, docs, lockstep version, diff
+     check, per-engine Brakeman scans, and all gemspec builds passed.
+     Restrictions observed: no functional code, tag, push, gem publication, or
+     repository .gem artifact.
+     Next action: open release-only PR and wait for complete CI/Security
+     workflow success; maintainer creates annotated v1.5.0 tag at merge. -->
