@@ -16,6 +16,7 @@ RSpec.describe "what the auth panel actually changes", type: :request do
   before do
     allow(Rails.env).to receive(:development?).and_return(true)
     ConsoleCredentials.reset!
+    get "/sparrowkit", params: {credential_target: "development"}
   end
 
   def save(overrides = {})

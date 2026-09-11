@@ -23,6 +23,8 @@ module SparrowPay
     # local development before routing ran, and it covers every panel mounted
     # below it, including this one.
     class SparrowkitController < ActionController::Base
+      include SparrowUi::Console::CredentialTargeting
+
       # This engine's URL helpers, included by hand, and the line is load-bearing.
       #
       # Rails gives an isolated engine's controllers their route helpers through
@@ -83,10 +85,13 @@ module SparrowPay
         # backwards: the value is handed to the processor untouched as the
         # address to send a customer back to. Nothing joins it to a host --
 
-        settings.write(MODULE_KEY, own_attributes(chosen))
-        settings.write(chosen.to_sym, processor_attributes(chosen)) unless chosen.empty?
+        changes = {MODULE_KEY => own_attributes(chosen)}
+        changes[chosen.to_sym] = processor_attributes(chosen) unless chosen.empty?
+        settings.write_many(changes)
 
         redirect_to root_path, notice: "Payment settings saved to your Rails credentials."
+      rescue ::SparrowUi::Console::Settings::NotWritable
+        refuse(settings.not_writable_reason)
       end
 
       private

@@ -47,7 +47,7 @@ RSpec.describe "the console font" do
     end
 
     it "points the page at a URL that resolves, rather than at the host's root" do
-      get "/sparrowkit"
+      get "/sparrowkit", params: {credential_target: "development"}
 
       expect(response.body).to include("url(/sparrowkit/inter.woff2)")
       expect(response.body).not_to include("url(InterVariable.woff2)")

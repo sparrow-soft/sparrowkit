@@ -19,6 +19,7 @@ RSpec.describe "signing in from the auth panel", type: :request do
   before do
     allow(Rails.env).to receive(:development?).and_return(true)
     ConsoleCredentials.reset!
+    get "/sparrowkit", params: {credential_target: "development"}
     SparrowMail.deliveries.clear
   end
 
@@ -26,11 +27,28 @@ RSpec.describe "signing in from the auth panel", type: :request do
     SparrowAuth::Account.create!(email: email, status_id: SparrowAuth::Account::VERIFIED)
   end
 
+  def sign_in_as(account_id)
+    # A successful sign-in rotates the Rails session and deliberately drops the
+    # selected target stored in it. Every executable direct request therefore
+    # carries its explicit Development target rather than relying on a prior
+    # session value.
+    post HARNESS, params: {credential_target: "development", account_id: account_id}
+  end
+
+  it "refuses a Production-target sign-in harness request before looking up an account" do
+    allow(SparrowAuth::Account).to receive(:find_by).and_raise("must not query accounts")
+
+    post HARNESS, params: {credential_target: "production", account_id: 1}
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.body).to eq("This action is unavailable for Production credentials.")
+  end
+
   describe "signing in" do
     it "signs the browser in as the chosen account" do
       account = verified("owner@example.test")
 
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
 
       expect(flash[:notice]).to include(account.email)
       get "/account-settings"
@@ -43,7 +61,7 @@ RSpec.describe "signing in from the auth panel", type: :request do
     it "leaves a real session, not a forged cookie" do
       account = verified("owner@example.test")
 
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
 
       expect(account.sessions.count).to eq(1)
     end
@@ -51,14 +69,14 @@ RSpec.describe "signing in from the auth panel", type: :request do
     it "records the sign-in the way every other sign-in is recorded" do
       account = verified("owner@example.test")
 
-      expect { post HARNESS, params: {account_id: account.id} }
+      expect { sign_in_as(account.id) }
         .to change(SparrowAuth::AuthEvent, :count)
     end
 
     it "consumes the code, so it cannot be redeemed a second time" do
       account = verified("owner@example.test")
 
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
 
       expect(SparrowAuth::OneTimeCode.where(email: account.email, consumed_at: nil)).to be_empty
     end
@@ -67,8 +85,8 @@ RSpec.describe "signing in from the auth panel", type: :request do
       first = verified("viewer@example.test")
       second = verified("admin@example.test")
 
-      post HARNESS, params: {account_id: first.id}
-      post HARNESS, params: {account_id: second.id}
+      sign_in_as(first.id)
+      sign_in_as(second.id)
 
       get "/account-settings"
       expect(response.body).to start_with(second.email)
@@ -84,7 +102,7 @@ RSpec.describe "signing in from the auth panel", type: :request do
         email: "unverified@example.test", status_id: SparrowAuth::Account::UNVERIFIED
       )
 
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
 
       expect(flash[:alert]).to be_present
       expect(account.sessions.count).to eq(0)
@@ -96,14 +114,14 @@ RSpec.describe "signing in from the auth panel", type: :request do
     it "is refused by the rate limit, and says so in words" do
       account = verified("owner@example.test")
 
-      post HARNESS, params: {account_id: account.id}
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
+      sign_in_as(account.id)
 
       expect(flash[:alert]).to match(/one message a minute/i)
     end
 
     it "refuses an account id that is not an account" do
-      post HARNESS, params: {account_id: 0}
+      sign_in_as(0)
 
       expect(flash[:alert]).to eq("No such account.")
     end
@@ -119,7 +137,7 @@ RSpec.describe "signing in from the auth panel", type: :request do
       allow(SparrowMail).to receive(:readable_deliveries).and_return([])
       allow(SparrowMail.configuration).to receive(:adapter).and_return(:postmark)
 
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
 
       expect(flash[:alert]).to match(/through your mail provider/i)
     end
@@ -129,7 +147,7 @@ RSpec.describe "signing in from the auth panel", type: :request do
       allow(SparrowMail).to receive(:readable_deliveries).and_return([])
       allow(SparrowMail.configuration).to receive(:adapter).and_return(nil)
 
-      post HARNESS, params: {account_id: account.id}
+      sign_in_as(account.id)
 
       expect(flash[:alert]).to match(/Mail panel/i)
     end

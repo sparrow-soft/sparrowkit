@@ -8,7 +8,7 @@ require "rails_helper"
 # inside the gem it excludes.
 RSpec.describe "the console gate", type: :request do
   def get_console(path = "/sparrowkit", remote_addr:, headers: {})
-    get path, env: {"REMOTE_ADDR" => remote_addr}, headers: headers
+    get path, params: {credential_target: "development"}, env: {"REMOTE_ADDR" => remote_addr}, headers: headers
   end
 
   context "in development" do

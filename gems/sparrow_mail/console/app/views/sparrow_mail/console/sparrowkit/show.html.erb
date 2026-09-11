@@ -45,6 +45,7 @@
   %>
   <input type="hidden" name="_method" value="patch" autocomplete="off">
   <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+  <input type="hidden" name="credential_target" value="<%= credential_target.name %>" autocomplete="off">
 
   <%#
     Two boxes, one stored value. The name and the address are separate things
@@ -77,11 +78,11 @@
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
             <% if @inherited_sender_name.present? %>
               Taken from the name on the
-              <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>.
+              <a href="<%= sparrow_ui.root_path(credential_target: credential_target.name) %>" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>.
               Change it there and this follows.
             <% else %>
               Set the name on the
-              <a href="/sparrowkit" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>
+              <a href="<%= sparrow_ui.root_path(credential_target: credential_target.name) %>" class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit home page</a>
               and mail goes out from it. Until then it goes out from the address alone.
             <% end %>
           </p>
@@ -186,7 +187,7 @@
             class="rounded-md bg-purple-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300 disabled:text-slate-600 dark:bg-purple-300 dark:text-purple-950 dark:disabled:bg-slate-700 dark:disabled:text-slate-400">
       Save mail settings
     </button>
-    <a href="<%= sparrow_ui.root_path %>"
+    <a href="<%= sparrow_ui.root_path(credential_target: credential_target.name) %>"
        class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100">
       Back to SparrowKit
     </a>
@@ -211,6 +212,7 @@
   reason. The choice is rendered from the live configuration's streams, not
   from the cards above, so it matches what a send would actually do.
 %>
+<% unless credential_target.production? %>
 <section class="mt-8 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
   <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Send a test email</h2>
   <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
@@ -226,6 +228,7 @@
 
   <form action="<%= test_send_path %>" method="post" autocomplete="off" class="mt-4">
     <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+    <input type="hidden" name="credential_target" value="<%= credential_target.name %>" autocomplete="off">
 
     <label for="sparrow_mail_test_recipient" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
       Send it to
@@ -306,6 +309,7 @@
         <form action="<%= mailbox_path %>" method="post">
           <input type="hidden" name="_method" value="delete">
           <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+          <input type="hidden" name="credential_target" value="<%= credential_target.name %>" autocomplete="off">
           <button type="submit"
                   class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-purple-900 hover:text-purple-900 dark:border-slate-700 dark:text-slate-200 dark:hover:border-purple-300 dark:hover:text-purple-300">
             Empty it
@@ -344,6 +348,7 @@
       </ol>
     <% end %>
   </section>
+<% end %>
 <% end %>
 
 <script>

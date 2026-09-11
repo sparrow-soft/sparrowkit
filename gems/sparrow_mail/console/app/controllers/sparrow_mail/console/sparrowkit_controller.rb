@@ -25,6 +25,8 @@ module SparrowMail
     # not local development before routing ran, and it covers every panel
     # mounted below it, including this one.
     class SparrowkitController < ActionController::Base
+      include SparrowUi::Console::CredentialTargeting
+
       layout "sparrow_ui/console"
 
       # Asked for rather than inherited.
@@ -39,6 +41,7 @@ module SparrowMail
       # :exception rather than :null_session. A console form that fails its
       # token should say so, not quietly save half of nothing.
       protect_from_forgery with: :exception
+      before_action :refuse_production_execution, only: [:clear_mailbox, :test_send]
 
       MODULE_KEY = SparrowMail::CREDENTIALS_KEY
 
@@ -109,11 +112,11 @@ module SparrowMail
         # masked, and writing what it has under the new name would carry
         # across everything except the one value that matters. The write
         # below then merges into, or removes, the moved subtree as usual.
-        SparrowMail::CREDENTIALS_STREAM_ALIASES.each do |old, current|
-          settings.move(MODULE_KEY, from: old, to: current)
-        end
-
-        settings.write(MODULE_KEY, attributes_for(chosen))
+        settings.move_and_write(
+          MODULE_KEY,
+          moves: SparrowMail::CREDENTIALS_STREAM_ALIASES,
+          attributes: attributes_for(chosen)
+        )
 
         # Written to credentials, and now read back into THIS process.
         #
@@ -128,6 +131,8 @@ module SparrowMail
         redirect_to root_path,
           notice: "Mail settings saved to your Rails credentials.",
           alert: separation_alert(chosen)
+      rescue ::SparrowUi::Console::Settings::NotWritable
+        refuse(settings.not_writable_reason)
       end
 
       # Sends one real message through SparrowMail.deliver -- the same path the
@@ -213,9 +218,9 @@ module SparrowMail
             held = configuration.sandbox? ? " Sandbox is on, so it was recorded rather than sent." : ""
             sent << "#{stream.to_s.capitalize} test handed to #{result.adapter} for #{recipient}.#{held}"
           else
-            refused << "#{stream.to_s.capitalize}: #{refusal_sentence(result)} (#{result.error.message})"
+            refused << "#{stream.to_s.capitalize}: #{refusal_sentence(result)}"
           end
-        rescue SparrowMail::Error => e
+        rescue SparrowMail::Error
           # ConfigurationError is a SIBLING of DeliveryError, not a subclass,
           # so the adapter's own rescue does not catch it and it came out of
           # here as a Rails exception page -- from the panel whose entire job
@@ -224,7 +229,7 @@ module SparrowMail
           # A missing API key is the commonest way to arrive here, and it is a
           # thing to be told, not a stack trace. Per stream, so the other one
           # still gets its answer.
-          refused << "#{stream.to_s.capitalize} did not send: #{e.message}"
+          refused << "#{stream.to_s.capitalize} did not send. Check the settings above and try again."
         end
 
         if sent.any?
@@ -293,8 +298,8 @@ module SparrowMail
       end
 
       # The taxonomy's category, said for a person standing at the settings
-      # page. The error's own message follows in the caller, already through
-      # the Redactor by the time it reaches a Result.
+      # page. Provider error messages are deliberately not shown: they can
+      # contain credentials or request details.
       def refusal_sentence(result)
         case result.category
         when :auth then "The provider refused the credentials — check the values saved above."

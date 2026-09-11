@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "securerandom"
 
 RSpec.describe SparrowUi::Engine do
   # Every Ruby file the gem ships. Explicit encoding, because
@@ -79,5 +80,13 @@ RSpec.describe SparrowUi::Engine do
     # one, so the console inlines this file rather than linking it. The dummy
     # app's layout does exactly that.
     expect(File).to exist(SparrowUi.stylesheet_path)
+  end
+
+  it "adds credential names to Rails request filters without replacing host filters" do
+    canary = SecureRandom.hex(24)
+    filter = ActiveSupport::ParameterFilter.new(Rails.application.config.filter_parameters)
+
+    expect(filter.filter(api_key: canary).fetch(:api_key)).to eq("[FILTERED]")
+    expect(filter.filter(otp_secret: canary).fetch(:otp_secret)).to eq("[FILTERED]")
   end
 end

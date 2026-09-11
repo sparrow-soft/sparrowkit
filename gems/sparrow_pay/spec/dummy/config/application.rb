@@ -45,11 +45,14 @@ module Dummy
     # The console panel's whole job is writing to Rails encrypted credentials,
     # so the specs need real ones -- a stubbed Settings would not exercise the
     # rule that a blank secret is dropped rather than written, which is the part
-    # most worth proving. They are generated per example into an ignored tmp
-    # directory: a master key in the repository is a habit worth not forming,
-    # even for a throwaway host. See spec/support/console_credentials.rb.
-    config.credentials.content_path = File.expand_path("../tmp/credentials.yml.enc", __dir__)
-    config.credentials.key_path = File.expand_path("../tmp/master.key", __dir__)
+    # most worth proving. The dummy application's runtime credentials are the
+    # same explicit Development target the console writes. This verifies a
+    # normal Development boot without giving the console a generic fallback.
+    # The files are generated per example and ignored; a master key in the
+    # repository is a habit worth not forming, even for a throwaway host. See
+    # spec/support/console_credentials.rb.
+    config.credentials.content_path = File.expand_path("credentials/development.yml.enc", __dir__)
+    config.credentials.key_path = File.expand_path("credentials/development.key", __dir__)
 
     # Generated on first boot as well as per example, so the panel is usable by
     # hand and not only by the suite. Without this the page renders its "cannot

@@ -34,9 +34,31 @@ Start your application and open `http://localhost:3000/sparrowkit`. Every module
 you have installed is listed, each with a badge saying whether it is ready,
 needs attention, or has not been configured yet.
 
-What you enter there is written to your Rails encrypted credentials, so it is
-committed with your application and deployed with it — there is no separate
-place to keep secrets in step.
+The Development and Production tabs keep two encrypted credential stores
+separate. The selected tab writes only to its matching file:
+
+- Development: `config/credentials/development.yml.enc`
+- Production: `config/credentials/production.yml.enc`
+
+Each file needs its matching key: `development.key` or `production.key` in
+`config/credentials/`, unless your deployment supplies the standard
+`RAILS_MASTER_KEY` instead. Rails checks that environment key first, then only
+the selected target's matching key file. The console never creates a file or a
+key, never falls back to `config/credentials.yml.enc`, and never copies a value
+between the two targets. If a selected file or key is unavailable, fix that
+target and reload the page; saving will stay unavailable until it can be read
+safely.
+
+The encrypted `.yml.enc` files can be committed with your application. Keys
+are deployed separately and must not be committed. Use your deployment
+platform's secret delivery process for the Production key, and make sure the
+Development key is available only to the developers who need it.
+
+Production values can be saved from this local, development-only console, but
+they are never exercised there. The console will not send test mail, clear its
+mailbox, sign in as an account, or run another provider-facing action while the
+Production tab is selected. Deploy and verify Production credentials through
+your normal production procedure.
 
 **The panel is served to your own machine, in development, and nowhere else.**
 A request is refused unless the application is running in development *and* it

@@ -18,6 +18,11 @@ require "rails_helper"
 FAKE_HMAC = "b6f3d1a9c2e84f07a5d3b1c9e7f2a8d4"
 
 RSpec.describe SparrowAuth::Console::Report do
+  around do |example|
+    target = SparrowUi::Console::Settings.resolve_target("development")
+    SparrowUi::Console::Settings.with_target(target) { example.run }
+  end
+
   def stub_credentials(tree)
     allow(::SparrowUi::Console::Settings).to receive(:read).with(SparrowAuth::CREDENTIALS_KEY).and_return(tree)
   end

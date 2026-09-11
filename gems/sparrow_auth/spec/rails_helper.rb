@@ -2,6 +2,7 @@
 
 ENV["RAILS_ENV"] = "test"
 
+require "fileutils"
 require_relative "dummy/config/environment"
 require "rspec/rails"
 
@@ -50,6 +51,11 @@ RSpec.configure do |config|
   # all for the examples that never wrote one.
   config.after do
     ConsoleCredentials.restore_baseline!
+  end
+
+  config.after(:suite) do
+    credentials = Rails.root.join("config/credentials")
+    FileUtils.rm_f([credentials.join("development.yml.enc"), credentials.join("development.key")])
   end
 
   config.before do

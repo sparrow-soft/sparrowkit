@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "securerandom"
 
 # The panel's test send: one address, one button, one honest answer to "are
 # these credentials actually right?" -- which is otherwise unanswerable
@@ -18,6 +19,7 @@ RSpec.describe "sending a test email from the panel", type: :request do
   before do
     allow(Rails.env).to receive(:development?).and_return(true)
     ConsoleCredentials.reset!
+    get "/sparrowkit", params: {credential_target: "development"}
     # The cooldown lives in Rails.cache, which outlives an example. Without
     # this, whichever example sends first silences every later one.
     Rails.cache.clear
@@ -43,6 +45,15 @@ RSpec.describe "sending a test email from the panel", type: :request do
 
   def streams_delivered
     SparrowMail.deliveries.map(&:stream)
+  end
+
+  it "refuses a Production-target test send before reading mail configuration" do
+    allow(SparrowMail).to receive(:configuration).and_raise("must not read configuration")
+
+    post TEST_SEND, params: {credential_target: "production", recipient: "dev@example.org"}
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.body).to eq("This action is unavailable for Production credentials.")
   end
 
   it "sends through the configured adapter, from the configured sender" do
@@ -95,9 +106,10 @@ RSpec.describe "sending a test email from the panel", type: :request do
     expect(flash[:alert]).to match(/sender/i)
   end
 
-  it "reports a refused send in the taxonomy's words, not a backtrace" do
+  it "reports a refused send in the taxonomy's words without exposing provider details" do
     configure_mail
-    error = SparrowMail::AuthenticationError.new("provider said 401")
+    canary = SecureRandom.hex(24)
+    error = SparrowMail::AuthenticationError.new(canary)
     allow(SparrowMail).to receive(:deliver).and_return(
       SparrowMail::Result.failed(error, recipients: ["dev@example.org"])
     )
@@ -105,7 +117,8 @@ RSpec.describe "sending a test email from the panel", type: :request do
     post TEST_SEND, params: {recipient: "dev@example.org"}
 
     expect(flash[:alert]).to match(/credentials/i)
-    expect(flash[:alert]).to include("provider said 401")
+    expect(flash[:alert]).not_to include(canary)
+    expect(response.body).not_to include(canary)
   end
 
   it "holds a second send back inside the cooldown, so a stuck finger cannot spend reputation" do
@@ -156,7 +169,8 @@ RSpec.describe "sending a test email from the panel", type: :request do
     end
 
     it "reports a failure on one stream beside a success on the other" do
-      error = SparrowMail::AuthenticationError.new("provider said 401")
+      canary = SecureRandom.hex(24)
+      error = SparrowMail::AuthenticationError.new(canary)
       allow(SparrowMail).to receive(:deliver).and_wrap_original do |original, message|
         if message[SparrowMail::Envelope::STREAM_HEADER].to_s == "broadcast"
           SparrowMail::Result.failed(error, recipients: ["dev@example.org"])
@@ -170,7 +184,8 @@ RSpec.describe "sending a test email from the panel", type: :request do
       expect(flash[:notice]).to include("Transactional test handed to test")
       expect(flash[:alert]).to start_with("Broadcast:")
       expect(flash[:alert]).to include("credentials")
-      expect(flash[:alert]).to include("provider said 401")
+      expect(flash[:alert]).not_to include(canary)
+      expect(response.body).not_to include(canary)
     end
 
     it "holds each stream back on its own clock" do

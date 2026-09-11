@@ -4,6 +4,7 @@ require_relative "console/status"
 require_relative "console/guide"
 require_relative "console/panel"
 require_relative "console/settings"
+require_relative "console/credential_targeting"
 
 module SparrowUi
   # The contract between this gem and every other SparrowKit module.

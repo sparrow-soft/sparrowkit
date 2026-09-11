@@ -74,7 +74,7 @@
 
     <header class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <div class="mx-auto flex max-w-4xl flex-wrap items-center gap-x-5 gap-y-3 px-6 py-4">
-        <a href="<%= sparrow_ui.root_path %>"
+        <a href="<%= sparrow_ui.root_path(credential_target: credential_target.name) %>"
            class="text-base font-semibold text-purple-900 dark:text-purple-300">SparrowKit</a>
         <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
           <%= SparrowUi::VERSION %>
@@ -104,6 +104,7 @@
         %>
         <% current_panel = panels.find { |panel| panel.current?(request.path, console_root) } %>
         <div class="ml-auto flex flex-wrap items-center justify-end gap-x-5 gap-y-3">
+          <%= render "sparrow_ui/console/credential_target_tabs" %>
           <%#
             From the registry, so this row is whatever is actually installed. A
             hardcoded Auth | Mail | Pay would offer a link to a gem that is not
@@ -112,7 +113,7 @@
           <% if panels.any? %>
             <nav aria-label="Modules" class="flex items-center gap-1">
               <% panels.each do |panel| %>
-                <% href = "#{console_root}#{panel.path}" %>
+                <% href = "#{console_root}#{panel.path}?credential_target=#{credential_target.name}" %>
                 <% current = panel.current?(request.path, console_root) %>
                 <%#
                   The full name as a tooltip, but only where it says something
@@ -235,6 +236,8 @@
           <%= flash[:alert] %>
         </div>
       <% end %>
+
+      <%= render "sparrow_ui/console/production_target_notice" %>
 
       <%= yield %>
     </main>
