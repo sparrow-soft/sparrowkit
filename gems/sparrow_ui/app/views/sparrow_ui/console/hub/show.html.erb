@@ -35,6 +35,7 @@
   <form action="<%= sparrow_ui.hub_path %>" method="post" autocomplete="off" class="mt-4">
     <input type="hidden" name="_method" value="patch" autocomplete="off">
     <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>" autocomplete="off">
+    <input type="hidden" name="credential_target" value="<%= credential_target.name %>" autocomplete="off">
 
     <label for="sparrowkit_app_url" class="block text-sm font-medium text-slate-900 dark:text-slate-100">
       Address<%= render "sparrow_ui/console/secret_set" if @app_url.present? %>
@@ -70,7 +71,7 @@
         Passkeys are bound to this domain, and changing it asks everybody with a passkey to enrol
         again — a passkey cannot be moved from one domain to another. To use a different domain for
         passkeys than for the site, say so on the
-        <a href="<%= sparrow_ui.root_path %>auth" class="font-medium text-purple-900 hover:underline dark:text-purple-300">Authentication</a>
+        <a href="<%= sparrow_ui.root_path %>auth?credential_target=<%= credential_target.name %>" class="font-medium text-purple-900 hover:underline dark:text-purple-300">Authentication</a>
         page.
       </p>
     <% end %>
@@ -158,7 +159,7 @@
     <li class="flex gap-3">
       <span aria-hidden="true" class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-purple-900 text-xs font-semibold text-white dark:bg-purple-300 dark:text-purple-950"><%= index + 1 %></span>
       <span>
-        <a href="<%= "#{request.script_name}#{panel.path}" %>"
+        <a href="<%= "#{request.script_name}#{panel.path}?credential_target=#{credential_target.name}" %>"
            class="font-medium text-purple-900 hover:underline dark:text-purple-300"><%= panel.name %></a>
         <% if why[panel.key] %>
           &mdash; <%= why[panel.key] %>
@@ -184,7 +185,7 @@
     <% @panels.each do |panel| %>
       <% status = panel.status %>
       <li>
-        <a href="<%= "#{request.script_name}#{panel.path}" %>"
+        <a href="<%= "#{request.script_name}#{panel.path}?credential_target=#{credential_target.name}" %>"
            class="group flex h-full flex-col rounded-lg border border-slate-200 bg-white px-5 py-4 transition-colors hover:border-purple-900 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-purple-300">
           <span class="flex items-start justify-between gap-3">
             <span class="text-base font-semibold text-purple-900 dark:text-purple-300"><%= panel.name %></span>

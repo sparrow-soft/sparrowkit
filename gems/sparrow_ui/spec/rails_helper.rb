@@ -2,6 +2,7 @@
 
 ENV["RAILS_ENV"] ||= "test"
 
+require "fileutils"
 require "spec_helper"
 require_relative "dummy/config/environment"
 require "rspec/rails"
@@ -16,4 +17,9 @@ RSpec.configure do |config|
   config.before(type: :request) { host! "localhost" }
 
   config.infer_spec_type_from_file_location!
+
+  config.after(:suite) do
+    credentials = Rails.root.join("config/credentials")
+    FileUtils.rm_f([credentials.join("development.yml.enc"), credentials.join("development.key")])
+  end
 end

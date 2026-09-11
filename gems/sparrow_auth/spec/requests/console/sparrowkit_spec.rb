@@ -17,6 +17,7 @@ RSpec.describe "the auth control panel", type: :request do
   before do
     allow(Rails.env).to receive(:development?).and_return(true)
     ConsoleCredentials.reset!
+    get "/sparrowkit", params: {credential_target: "development"}
   end
 
   def stored
@@ -81,7 +82,7 @@ RSpec.describe "the auth control panel", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.body).to include("Authentication")
-      expect(response.body).to include(%(href="#{AUTH_PANEL}"))
+      expect(response.body).to include(%(href="#{AUTH_PANEL}?credential_target=development"))
     end
   end
 
@@ -215,7 +216,7 @@ RSpec.describe "the auth control panel", type: :request do
 
       expect(response.body).to include("example.com")
       expect(response.body).to match(/home page|front page/i)
-      expect(response.body).to include(%(href="/sparrowkit"))
+      expect(response.body).to include(%(href="/sparrowkit/?credential_target=development"))
     end
 
     it "says what changing the Relying Party ID costs, whether or not it is changing" do
@@ -592,7 +593,8 @@ RSpec.describe "the auth control panel", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.body).to include("This page cannot save anything yet")
-      expect(response.body).to include("no master key")
+      expect(response.body).to include("Development credentials are unavailable.")
+      expect(response.body).not_to include("master.key")
       expect(response.body).to include("disabled")
     end
 
@@ -669,6 +671,10 @@ RSpec.describe "the auth control panel", type: :request do
   describe "what the application actually uses afterwards" do
     def boot!
       # Exactly what the engine initializer does, against the file on disk.
+      # A fresh process has no Rails credentials cache; make this integration
+      # example match that process boundary after the console's explicit target
+      # store wrote the file.
+      ConsoleCredentials.forget!
       SparrowAuth.reset!
       SparrowAuth.configure do |config|
         SparrowAuth.credentials.each do |name, value|
@@ -699,13 +705,11 @@ RSpec.describe "the auth control panel", type: :request do
       SparrowAuth.reset!
     end
 
-    it "puts it where a developer editing credentials by hand would look" do
+    it "puts it in the selected Development credentials target" do
       # `sparrow_auth:` at the top level, named after the gem that reads it.
       save
 
-      ConsoleCredentials.forget!
-
-      expect(Rails.application.credentials.config).to have_key(:sparrow_auth)
+      expect(ConsoleCredentials.stored_tree).to have_key(:sparrow_auth)
     end
 
     it "ignores a credentials key that is not a setting, rather than refusing to boot" do

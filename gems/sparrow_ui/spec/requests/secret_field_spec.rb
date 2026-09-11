@@ -22,7 +22,7 @@ RSpec.describe "the console's secret fields", type: :request do
   before { allow(Rails.env).to receive(:development?).and_return(true) }
 
   def get_panel(path)
-    get path, env: {"REMOTE_ADDR" => "127.0.0.1"}
+    get path, params: {credential_target: "development"}, env: {"REMOTE_ADDR" => "127.0.0.1"}
   end
 
   # sparrow_mail is the panel this dummy boots with, and its API key fields are

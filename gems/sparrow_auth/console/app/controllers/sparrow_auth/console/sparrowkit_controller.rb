@@ -23,6 +23,8 @@ module SparrowAuth
     # local development before routing ran, and it covers every panel mounted
     # below it, including this one.
     class SparrowkitController < ActionController::Base
+      include SparrowUi::Console::CredentialTargeting
+
       # This engine's URL helpers, included by hand, and the line is load-bearing.
       #
       # Rails gives an isolated engine's controllers their route helpers through
@@ -49,6 +51,7 @@ module SparrowAuth
       # :exception rather than :null_session. A console form that fails its
       # token should say so, not quietly save half of nothing.
       protect_from_forgery with: :exception
+      before_action :refuse_production_execution, only: :sign_in_as
 
       MODULE_KEY = SparrowAuth::CREDENTIALS_KEY
 
@@ -238,6 +241,8 @@ module SparrowAuth
         redirect_to root_path,
           notice: "Authentication settings saved to your Rails credentials.",
           alert: alert
+      rescue ::SparrowUi::Console::Settings::NotWritable
+        refuse(settings.not_writable_reason)
       end
 
       private

@@ -9,6 +9,8 @@ module SparrowUi
     # development before routing ran, and it covers every panel mounted below
     # this one too.
     class HubController < ActionController::Base
+      include CredentialTargeting
+
       layout "sparrow_ui/console"
 
       # Asked for rather than inherited.
@@ -93,9 +95,16 @@ module SparrowUi
         )
 
         redirect_to root_path, notice: "Saved."
+      rescue Settings::NotWritable
+        refuse_unavailable_target
       end
 
       private
+
+      def refuse_unavailable_target
+        flash[:alert] = Settings.not_writable_reason
+        redirect_to root_path
+      end
 
       def load_app_url
         @app_url = Settings.app_url

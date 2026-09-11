@@ -32,6 +32,7 @@ RSpec.describe "the mailbox on the mail panel", type: :request do
   before do
     allow(Rails.env).to receive(:development?).and_return(true)
     ConsoleCredentials.reset!
+    get "/sparrowkit", params: {credential_target: "development"}
     Rails.cache.clear
   end
 
@@ -52,6 +53,15 @@ RSpec.describe "the mailbox on the mail panel", type: :request do
         mail.body = body
       end
     )
+  end
+
+  it "refuses a Production-target mailbox clear before touching preview mail" do
+    allow(SparrowMail::Adapters::Preview).to receive(:clear!).and_raise("must not clear mail")
+
+    delete MAILBOX, params: {credential_target: "production"}
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.body).to eq("This action is unavailable for Production credentials.")
   end
 
   describe "while no provider is configured" do

@@ -2,6 +2,7 @@
 
 require "rails/engine"
 require_relative "console/loopback_guard"
+require_relative "console/settings"
 
 module SparrowUi
   # Registers the console's views and its compiled stylesheet with a host, and
@@ -21,6 +22,13 @@ module SparrowUi
     # Every request to anything mounted under this engine passes through here
     # first, including panels registered by other gems.
     middleware.use SparrowUi::Console::LoopbackGuard
+
+    # Console forms receive provider and signing credentials. Keep the host's
+    # filters and add the same conservative matcher Settings uses before a
+    # secret can reach Rails' normal request logging.
+    initializer "sparrow_ui.filter_credential_parameters" do |app|
+      app.config.filter_parameters |= [SparrowUi::Console::Settings::SECRET_NAME]
+    end
 
     # Propshaft and Sprockets both read this. A host with neither still works:
     # the console inlines the stylesheet rather than linking it.

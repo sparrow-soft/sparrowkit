@@ -17,6 +17,7 @@ RSpec.describe "the payments control panel", type: :request do
   before do
     allow(Rails.env).to receive(:development?).and_return(true)
     ConsoleCredentials.reset!
+    get "/sparrowkit", params: {credential_target: "development"}
   end
 
   # Whichever processor Pay happens to list first, and whatever Pay reads for

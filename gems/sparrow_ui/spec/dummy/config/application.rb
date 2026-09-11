@@ -43,11 +43,13 @@ module Dummy
     # host needs some or every panel renders its "cannot save anything yet"
     # state and bin/console demonstrates nothing.
     #
-    # Generated on first boot into an ignored tmp directory rather than
-    # committed: a master key in a repository is a habit worth not forming,
-    # even for a throwaway host with nothing in it.
-    config.credentials.content_path = File.expand_path("../tmp/credentials.yml.enc", __dir__)
-    config.credentials.key_path = File.expand_path("../tmp/master.key", __dir__)
+    # The dummy runtime uses the exact explicit Development target that the
+    # console reads and writes. This verifies normal Development behavior
+    # without giving production code a generic credentials fallback. The files
+    # are generated, not committed: a repository master key is a habit worth
+    # not forming, even for a throwaway host with nothing in it.
+    config.credentials.content_path = File.expand_path("credentials/development.yml.enc", __dir__)
+    config.credentials.key_path = File.expand_path("credentials/development.key", __dir__)
 
     initializer "dummy.credentials" do |app|
       key = Pathname(app.config.credentials.key_path)

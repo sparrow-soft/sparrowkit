@@ -11,7 +11,7 @@ require "rails_helper"
 RSpec.describe "the console layout", type: :request do
   before { allow(Rails.env).to receive(:development?).and_return(true) }
 
-  def show = get("/sparrowkit", env: {"REMOTE_ADDR" => "127.0.0.1"})
+  def show = get("/sparrowkit", params: {credential_target: "development"}, env: {"REMOTE_ADDR" => "127.0.0.1"})
 
   # The header's nav. Which panel counts as current is Panel#current?, tested
   # exhaustively against every near-miss path in its own spec; what is left to
@@ -47,7 +47,7 @@ RSpec.describe "the console layout", type: :request do
 
     # The whole anchor for one panel, markup and all.
     def nav_link_for(key)
-      response.body[%r{<a href="/sparrowkit/#{key}".*?</a>}m]
+      response.body[%r{<a href="/sparrowkit/#{key}\?credential_target=\w+".*?</a>}m]
     end
 
     # ...and roughly what it says, tags stripped and whitespace collapsed.
@@ -86,18 +86,18 @@ RSpec.describe "the console layout", type: :request do
     # renders correct links on the front page and /sparrowkit/mail/mail
     # everywhere else. This asserts from inside a panel for that reason.
     it "builds the same absolute links from inside a panel as from the hub" do
-      get "/sparrowkit/mail", env: {"REMOTE_ADDR" => "127.0.0.1"}
+      get "/sparrowkit/mail", params: {credential_target: "development"}, env: {"REMOTE_ADDR" => "127.0.0.1"}
 
-      expect(response.body).to include(%(<a href="/sparrowkit/mail"))
+      expect(response.body).to match(%r{<a\s+href="/sparrowkit/mail\?credential_target=development"}m)
       expect(response.body).not_to include("/sparrowkit/mail/mail")
     end
 
     it "marks the panel being viewed, and only that one" do
       with_panels(auth: ["Authentication", "Auth"]) do
-        get "/sparrowkit/mail", env: {"REMOTE_ADDR" => "127.0.0.1"}
+        get "/sparrowkit/mail", params: {credential_target: "development"}, env: {"REMOTE_ADDR" => "127.0.0.1"}
 
-        expect(response.body).to match(%r{href="/sparrowkit/mail"\s+aria-current="page"}m)
-        expect(response.body).not_to match(%r{href="/sparrowkit/auth"\s+aria-current="page"}m)
+        expect(response.body).to match(%r{href="/sparrowkit/mail\?credential_target=development"\s+aria-current="page"}m)
+        expect(response.body).not_to match(%r{href="/sparrowkit/auth\?credential_target=development"\s+aria-current="page"}m)
       end
     end
 
@@ -109,7 +109,7 @@ RSpec.describe "the console layout", type: :request do
     it "marks nothing on the hub" do
       show
 
-      expect(response.body).not_to match(/<a href="[^"]*"\s+aria-current/m)
+      expect(response.body).not_to match(%r{<a href="/sparrowkit/[^?"]+\?credential_target=development"\s+aria-current}m)
     end
 
     # The glyph beside each link. Four states, two shapes: `ready` is the tick,
@@ -191,6 +191,41 @@ RSpec.describe "the console layout", type: :request do
           expect(nav_link_for(:auth)).to include('<svg aria-hidden="true"')
         end
       end
+    end
+  end
+
+  describe "the credential target tabs" do
+    it "renders a visible Credentials label and target links with the selected target announced" do
+      show
+
+      expect(response.body).to include(">Credentials</span>")
+      expect(response.body).to include('aria-label="Credential target"')
+      expect(response.body).to match(%r{href="/sparrowkit/\?credential_target=development"\s+aria-current="page"}m)
+      expect(response.body).to include('href="/sparrowkit/?credential_target=production"')
+    end
+
+    it "gives every target link a 44px minimum touch height" do
+      show
+
+      target_navigation = response.body[/<nav aria-label="Credential target".*?<\/nav>/m]
+      target_links = target_navigation.scan(%r{<a href="/sparrowkit/\?credential_target=(?:development|production)"[^>]*>})
+
+      expect(target_links).to all(include("px-3 py-3"))
+    end
+
+    it "preserves the selected target in module navigation" do
+      get "/sparrowkit/mail", params: {credential_target: "production"}, env: {"REMOTE_ADDR" => "127.0.0.1"}
+
+      expect(response.body).to include('href="/sparrowkit/?credential_target=production"')
+      expect(response.body).to include('name="credential_target" value="production"')
+    end
+
+    it "shows only configuration controls for Production" do
+      get "/sparrowkit/mail", params: {credential_target: "production"}, env: {"REMOTE_ADDR" => "127.0.0.1"}
+
+      expect(response.body).to include("Production credentials: configuration saves only")
+      expect(response.body).not_to include("Send a test email")
+      expect(response.body).not_to include("Empty it")
     end
   end
 

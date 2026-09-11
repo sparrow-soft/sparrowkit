@@ -3,8 +3,8 @@
 require "fileutils"
 require "yaml"
 
-# Real Rails encrypted credentials for the panel's request specs, built fresh
-# per example in an ignored tmp directory.
+# Real Rails encrypted Development credentials for the panel's request specs,
+# built fresh per example in an ignored directory.
 #
 # Real ones rather than a stubbed SparrowUi::Console::Settings, because the
 # behaviour most worth proving lives inside Settings.write: a blank secret is
@@ -74,14 +74,23 @@ module ConsoleCredentials
     forget!
   end
 
-  # What is actually on disk now, decrypted from scratch.
+  # What is actually in the explicit Development target now, decrypted from
+  # scratch. The dummy runtime is configured to that target on purpose.
   def stored
+    stored_tree[SparrowMail::CREDENTIALS_KEY] || {}
+  end
+
+  def stored_tree
     forget!
-    Rails.application.credentials.config[SparrowMail::CREDENTIALS_KEY] || {}
+    Rails.application.credentials.config
   end
 
   def forget!
-    ::SparrowUi::Console::Settings.forget!
+    # Test-fixture cache reset only. Console settings intentionally never
+    # resets or reads Rails.application.credentials, because target selection
+    # must stay explicit in production code.
+    application = Rails.application
+    application.remove_instance_variable(:@credentials) if application.instance_variable_defined?(:@credentials)
   end
 
   def deep_stringify(object)

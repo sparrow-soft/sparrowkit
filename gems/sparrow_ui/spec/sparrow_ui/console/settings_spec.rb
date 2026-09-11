@@ -7,6 +7,11 @@ require "rails_helper"
 # because a form had to submit an empty box -- and a stub proves only that they
 # were called.
 RSpec.describe SparrowUi::Console::Settings do
+  around do |example|
+    target = described_class.resolve_target("development")
+    described_class.with_target(target) { example.run }
+  end
+
   # A whole credentials tree, because that is now the shape: one top-level key
   # per gem, named after whoever reads it.
   def reset!(tree = nil)

@@ -13,6 +13,11 @@ require "rails_helper"
 # and `require_authentication!` -- none of which ever existed anywhere in this
 # gem. They were caught by hand, which is not a method that scales.
 RSpec.describe "the API sparrow_auth's guide names" do
+  around do |example|
+    target = SparrowUi::Console::Settings.resolve_target("development")
+    SparrowUi::Console::Settings.with_target(target) { example.run }
+  end
+
   let(:guide) { SparrowAuth::Console::Guide.new }
 
   let(:text) { [guide.steps.join("\n"), guide.brief].join("\n") }

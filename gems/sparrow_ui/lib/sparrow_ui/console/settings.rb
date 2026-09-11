@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/encrypted_configuration"
+
 module SparrowUi
   module Console
     # Reads and writes a module's configuration in the host application's Rails
@@ -41,6 +43,152 @@ module SparrowUi
     # characters, never a value. The write path is one-way on purpose: a value
     # goes in, and the only way to see it again is `credentials:edit`.
     module Settings
+      TARGET_PARAM = :credential_target
+      TARGET_SESSION_KEY = :sparrow_ui_credential_target
+      INVALID_TARGET_MESSAGE = "Choose a supported credential target."
+
+      Target = Struct.new(:name, :label, :content_path, :key_path) do
+        def production?
+          name == "production"
+        end
+      end
+
+      class Unavailable < StandardError; end
+
+      # Each target supplies Rails' encrypted-configuration API with its own
+      # fixed ciphertext and key-file paths. Rails still resolves
+      # RAILS_MASTER_KEY before that explicit target key, as it does for every
+      # encrypted configuration.
+      class TargetConfiguration < ActiveSupport::EncryptedConfiguration
+      end
+
+      # A short-lived facade around one target. It creates a fresh encrypted
+      # configuration for every operation so a development read can never be
+      # reused for a production request, or vice versa.
+      class Store
+        def initialize(target)
+          @target = target
+        end
+
+        def app_url
+          read(CONSOLE_KEY)[:app_url].to_s
+        end
+
+        def app_name
+          read(CONSOLE_KEY)[:app_name].to_s
+        end
+
+        def app_host
+          uri = URI.parse(app_url)
+          uri.host.presence
+        rescue URI::InvalidURIError
+          nil
+        end
+
+        def all
+          decrypted_config
+        rescue Unavailable
+          {}
+        end
+
+        def read(gem_key)
+          value = all[gem_key.to_sym]
+          value.is_a?(Hash) ? value : {}
+        end
+
+        def for_display(gem_key)
+          Settings.mask(read(gem_key))
+        end
+
+        def write(gem_key, attributes)
+          write_many(gem_key => attributes).fetch(gem_key.to_sym)
+        end
+
+        def write_many(changes)
+          encrypted = opened_configuration
+          data = encrypted.config.deep_dup
+          merged = changes.to_h.each_with_object({}) do |(gem_key, attributes), out|
+            key = gem_key.to_sym
+            out[key] = Settings.deep_merge(
+              data[key].is_a?(Hash) ? data[key] : {},
+              Settings.sanitize(attributes)
+            )
+            data[key] = out[key]
+          end
+          encrypted.write(Settings.deep_stringify(data).to_yaml)
+          merged
+        rescue Unavailable
+          raise NotWritable, not_writable_reason
+        rescue
+          raise NotWritable, not_writable_reason
+        end
+
+        def move_and_write(gem_key, moves:, attributes:)
+          encrypted = opened_configuration
+          data = encrypted.config.deep_dup
+          key = gem_key.to_sym
+          tree = data[key].is_a?(Hash) ? data[key].dup : {}
+          moved = false
+
+          moves.each do |from, to|
+            next unless tree.key?(from.to_sym)
+
+            value = tree.delete(from.to_sym)
+            tree[to.to_sym] = value unless tree.key?(to.to_sym)
+            moved = true
+          end
+
+          sanitized_attributes = Settings.sanitize(attributes)
+          return false unless moved || sanitized_attributes.present?
+
+          data[key] = Settings.deep_merge(tree, sanitized_attributes)
+          encrypted.write(Settings.deep_stringify(data).to_yaml)
+          true
+        rescue Unavailable
+          raise NotWritable, not_writable_reason
+        rescue
+          raise NotWritable, not_writable_reason
+        end
+
+        def writable?
+          decrypted_config
+          true
+        rescue Unavailable
+          false
+        end
+
+        def not_writable_reason
+          "#{@target.label} credentials are unavailable. Make that target available and reload."
+        end
+
+        private
+
+        def decrypted_config
+          opened_configuration.config
+        rescue
+          raise Unavailable
+        end
+
+        def opened_configuration
+          raise Unavailable unless @target.content_path.file?
+
+          configuration = TargetConfiguration.new(
+            config_path: @target.content_path,
+            key_path: @target.key_path,
+            env_key: "RAILS_MASTER_KEY",
+            raise_if_missing_key: false
+          )
+          raise Unavailable unless configuration.key?
+
+          configuration
+        end
+      end
+
+      TARGETS = {
+        "development" => ["Development", "development.yml.enc", "development.key"].freeze,
+        "production" => ["Production", "production.yml.enc", "production.key"].freeze
+      }.freeze
+
       # A field whose name matches this is masked on the way out and never
       # rendered. Matching on the NAME rather than a per-module list means a
       # module that adds `stripe_secret_key` tomorrow is covered without
@@ -92,16 +240,54 @@ module SparrowUi
 
       module_function
 
+      def resolve_target(value)
+        return nil unless value.is_a?(String)
+
+        label, content_name, key_name = TARGETS[value]
+        return nil if label.nil?
+
+        Target.new(
+          name: value,
+          label: label,
+          content_path: Rails.root.join("config/credentials", content_name),
+          key_path: Rails.root.join("config/credentials", key_name)
+        )
+      end
+
+      def invalid_target_message
+        INVALID_TARGET_MESSAGE
+      end
+
+      def with_target(target)
+        previous = Thread.current[thread_target_key]
+        Thread.current[thread_target_key] = target
+        yield
+      ensure
+        Thread.current[thread_target_key] = previous
+      end
+
+      def current_target
+        Thread.current[thread_target_key]
+      end
+
+      def target
+        current_target || raise(Unavailable, "credential target has not been selected")
+      end
+
+      def store
+        Store.new(target)
+      end
+
       # The application's address, as the hub last recorded it.
       def app_url
-        read(CONSOLE_KEY)[:app_url].to_s
+        store.app_url
       end
 
       # What the product is called. Shown to people rather than matched against
       # anything: the name in the passkey prompt their operating system draws,
       # and the name mail can come from.
       def app_name
-        read(CONSOLE_KEY)[:app_name].to_s
+        store.app_name
       end
 
       # ...and just its host, which is what a passkey binds to.
@@ -109,10 +295,7 @@ module SparrowUi
       # nil rather than a guess for anything unparseable or missing a host, so
       # a caller defaults to nothing rather than to rubbish.
       def app_host
-        uri = URI.parse(app_url)
-        uri.host.presence
-      rescue URI::InvalidURIError
-        nil
+        store.app_host
       end
 
       def secret?(name)
@@ -121,17 +304,12 @@ module SparrowUi
 
       # The whole decrypted tree, or {} when credentials are unreadable.
       def all
-        credentials&.config || {}
-      rescue => e
-        Rails.logger&.warn("[sparrow_ui] could not read credentials: #{e.class}")
-        {}
+        store.all
       end
 
       # One gem's settings, by the top-level key that gem reads.
       def read(gem_key)
-        value = all[gem_key.to_sym]
-
-        value.is_a?(Hash) ? value : {}
+        store.read(gem_key)
       end
 
       # What a panel renders. Secrets collapse to presence plus the last four
@@ -148,7 +326,7 @@ module SparrowUi
       # whole, API key and all. Nesting quietly turned off the one rule this
       # module exists to enforce.
       def for_display(gem_key)
-        mask(read(gem_key))
+        store.for_display(gem_key)
       end
 
       def mask(tree)
@@ -183,16 +361,11 @@ module SparrowUi
       # take `broadcast:` back out, and leaving it behind would leave a stream
       # configured that nobody meant to keep.
       def write(gem_key, attributes)
-        raise NotWritable, not_writable_reason unless writable?
+        store.write(gem_key, attributes)
+      end
 
-        merged = deep_merge(read(gem_key), sanitize(attributes))
-
-        data = credentials.config.deep_dup
-        data[gem_key.to_sym] = merged
-        credentials.write(deep_stringify(data).to_yaml)
-        forget!
-
-        merged
+      def write_many(changes)
+        store.write_many(changes)
       end
 
       # Moves one subtree of a module's settings to another key, secrets and
@@ -207,60 +380,25 @@ module SparrowUi
       #
       # Returns true when the file changed.
       def move(gem_key, from:, to:)
-        raise NotWritable, not_writable_reason unless writable?
-
-        tree = read(gem_key)
-        return false unless tree.key?(from.to_sym)
-
-        moved = tree.dup
-        value = moved.delete(from.to_sym)
-        moved[to.to_sym] = value unless moved.key?(to.to_sym)
-
-        data = credentials.config.deep_dup
-        data[gem_key.to_sym] = moved
-        credentials.write(deep_stringify(data).to_yaml)
-        forget!
-
-        true
+        store.move_and_write(gem_key, moves: {from => to}, attributes: {})
       end
 
-      # Drops Rails' memoised credentials object so the next read decrypts the
-      # file we just wrote.
-      #
-      # Not housekeeping. ActiveSupport::EncryptedConfiguration memoises the
-      # decrypted tree the first time anything reads it, and its #write does not
-      # clear that -- while Rails memoises the configuration object itself on
-      # the application, which lives for the whole process. Without this, a save
-      # succeeds, the file on disk is correct, and every page for the rest of the
-      # server's life keeps rendering what was there before: the panel says the
-      # key is unset seconds after you set it, and a second save is computed by
-      # merging into stale values and silently drops the first one.
-      def forget!
-        app = ::Rails.application
-        return unless app.instance_variable_defined?(:@credentials)
+      def move_and_write(gem_key, moves:, attributes:)
+        store.move_and_write(gem_key, moves: moves, attributes: attributes)
+      end
 
-        app.remove_instance_variable(:@credentials)
+      # Retained for callers that previously cleared Rails' default credentials
+      # cache after a console save. Target stores are new per operation, so they
+      # have no process-level decrypted tree to clear.
+      def forget!
       end
 
       def writable?
-        credentials.present? && credentials.key.present?
-      rescue
-        false
+        store.writable?
       end
 
       def not_writable_reason
-        if credentials.nil?
-          "this application has no credentials configured"
-        else
-          "no master key. Set RAILS_MASTER_KEY or create config/master.key, " \
-          "then reload this page."
-        end
-      end
-
-      def credentials
-        return nil unless defined?(::Rails) && ::Rails.application
-
-        ::Rails.application.credentials
+        store.not_writable_reason
       end
 
       # -- mailboxes -------------------------------------------------------
@@ -366,6 +504,10 @@ module SparrowUi
         when Array then object.map { |v| deep_stringify(v) }
         else object
         end
+      end
+
+      def thread_target_key
+        :sparrow_ui_console_credential_target
       end
 
       # Raised when a panel tries to save and the application cannot decrypt or

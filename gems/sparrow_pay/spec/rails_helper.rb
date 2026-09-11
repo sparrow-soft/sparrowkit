@@ -2,6 +2,7 @@
 
 ENV["RAILS_ENV"] = "test"
 
+require "fileutils"
 require_relative "dummy/config/environment"
 require "rspec/rails"
 
@@ -59,5 +60,10 @@ RSpec.configure do |config|
       config.default_processor = :fake_processor
       config.allow_fake_processor = true
     end
+  end
+
+  config.after(:suite) do
+    credentials = Rails.root.join("config/credentials")
+    FileUtils.rm_f([credentials.join("development.yml.enc"), credentials.join("development.key")])
   end
 end
