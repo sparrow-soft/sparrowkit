@@ -7,6 +7,22 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.5.1 - 2026-09-13
+
+### Fixed
+
+- The development console's header could wrap onto two lines well before the
+  window got narrow: a "Credentials" label sat next to a nav already labelled
+  Development and Production, and the gaps between nav sections were wider
+  than they needed to be. Removed the redundant label and tightened the
+  spacing so the header holds to one line at common window widths.
+
+### Changed
+
+- The colour-theme switcher moved from the header to the footer, right-aligned
+  next to the copyright line, freeing header space for the credential-target
+  tabs and module navigation.
+
 ## 1.5.0 - 2026-09-11
 
 ### Added
