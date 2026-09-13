@@ -73,7 +73,7 @@
     <% console_root = sparrow_ui.root_path.chomp("/") %>
 
     <header class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <div class="mx-auto flex max-w-4xl flex-wrap items-center gap-x-5 gap-y-3 px-6 py-4">
+      <div class="mx-auto flex max-w-4xl flex-wrap items-center gap-x-3 gap-y-3 px-6 py-4">
         <a href="<%= sparrow_ui.root_path(credential_target: credential_target.name) %>"
            class="text-base font-semibold text-purple-900 dark:text-purple-300">SparrowKit</a>
         <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -103,7 +103,7 @@
           where you are.
         %>
         <% current_panel = panels.find { |panel| panel.current?(request.path, console_root) } %>
-        <div class="ml-auto flex flex-wrap items-center justify-end gap-x-5 gap-y-3">
+        <div class="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-3">
           <%= render "sparrow_ui/console/credential_target_tabs" %>
           <%#
             From the registry, so this row is whatever is actually installed. A
@@ -166,59 +166,6 @@
               <path d="M10 2h4v4M14 2 7.5 8.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </a>
-
-          <%#
-            Hidden until the script un-hides it, because without scripting
-            there is nothing for it to do: the page is already dark by default,
-            from the stylesheet, and a dead control that never responds is
-            worse than no control.
-
-            Hidden by the `hidden` UTILITY rather than the attribute. The
-            attribute is `display: none` from the browser's own stylesheet,
-            which any author rule beats -- so `flex` on the same element would
-            win and it would never be hidden at all. Both are classes here, so
-            the last one set decides.
-
-            Styled off aria-pressed rather than a class the script swaps. The
-            state a screen reader announces and the state you can see are then
-            the same fact, and cannot drift apart.
-
-            Icons rather than words, and each still carries its word. The glyph
-            is hidden from anything that reads the page aloud and the name is
-            in an sr-only span, so the button is still announced as "System",
-            "Light" or "Dark" -- an icon-only control whose name is only in a
-            tooltip is a control a screen reader cannot describe. `title` is
-            there as well, for a pointer.
-          %>
-          <div id="sk-theme"
-               role="group"
-               aria-label="Colour theme"
-               class="hidden items-center gap-0.5 rounded-md border border-slate-300 p-0.5 dark:border-slate-700">
-            <button type="button" data-sk-theme="system" aria-pressed="false" title="Follow the system setting"
-                    class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
-              <span class="sr-only">System</span>
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
-                <rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.25"/>
-                <path d="M5.5 14h5M8 11.5V14" stroke-linecap="round"/>
-              </svg>
-            </button>
-            <button type="button" data-sk-theme="light" aria-pressed="false" title="Always light"
-                    class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
-              <span class="sr-only">Light</span>
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
-                <circle cx="8" cy="8" r="3.25"/>
-                <path d="M8 1v1.5M8 13.5V15M15 8h-1.5M2.5 8H1M12.95 3.05l-1.06 1.06M4.11 11.89l-1.06 1.06M12.95 12.95l-1.06-1.06M4.11 4.11 3.05 3.05" stroke-linecap="round"/>
-              </svg>
-            </button>
-            <button type="button" data-sk-theme="dark" aria-pressed="false" title="Always dark"
-                    class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
-              <span class="sr-only">Dark</span>
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
-                <path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1Z" stroke-linejoin="round"/>
-              </svg>
-            </button>
-          </div>
-          </div>
         </div>
       </div>
     </header>
@@ -251,14 +198,69 @@
       frozen at the year it was typed is wrong from the next January onwards,
       and nobody notices a footer going stale.
     %>
-    <footer class="mx-auto max-w-4xl px-6 pb-10 text-sm text-slate-500 dark:text-slate-300">
-      &copy; <%= Time.now.year %>
-      <a href="https://sparrowkit.co"
-         class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit</a>
-      - a
-      <a href="https://sparrowsoft.co"
-         class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowSoft</a>
-      project
+    <footer class="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-3 gap-y-3 px-6 pb-10 text-sm text-slate-500 dark:text-slate-300">
+      <p>
+        &copy; <%= Time.now.year %>
+        <a href="https://sparrowkit.co"
+           class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowKit</a>
+        - a
+        <a href="https://sparrowsoft.co"
+           class="font-medium text-purple-900 hover:underline dark:text-purple-300">SparrowSoft</a>
+        project
+      </p>
+
+      <%#
+        Moved here from the header to give the nav more room on one line.
+        Hidden until the script un-hides it, because without scripting there
+        is nothing for it to do: the page is already dark by default, from the
+        stylesheet, and a dead control that never responds is worse than no
+        control.
+
+        Hidden by the `hidden` UTILITY rather than the attribute. The
+        attribute is `display: none` from the browser's own stylesheet, which
+        any author rule beats -- so `flex` on the same element would win and
+        it would never be hidden at all. Both are classes here, so the last
+        one set decides.
+
+        Styled off aria-pressed rather than a class the script swaps. The
+        state a screen reader announces and the state you can see are then the
+        same fact, and cannot drift apart.
+
+        Icons rather than words, and each still carries its word. The glyph is
+        hidden from anything that reads the page aloud and the name is in an
+        sr-only span, so the button is still announced as "System", "Light" or
+        "Dark" -- an icon-only control whose name is only in a tooltip is a
+        control a screen reader cannot describe. `title` is there as well, for
+        a pointer.
+      %>
+      <div id="sk-theme"
+           role="group"
+           aria-label="Colour theme"
+           class="hidden items-center gap-0.5 rounded-md border border-slate-300 p-0.5 dark:border-slate-700">
+        <button type="button" data-sk-theme="system" aria-pressed="false" title="Follow the system setting"
+                class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
+          <span class="sr-only">System</span>
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
+            <rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.25"/>
+            <path d="M5.5 14h5M8 11.5V14" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button type="button" data-sk-theme="light" aria-pressed="false" title="Always light"
+                class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
+          <span class="sr-only">Light</span>
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
+            <circle cx="8" cy="8" r="3.25"/>
+            <path d="M8 1v1.5M8 13.5V15M15 8h-1.5M2.5 8H1M12.95 3.05l-1.06 1.06M4.11 11.89l-1.06 1.06M12.95 12.95l-1.06-1.06M4.11 4.11 3.05 3.05" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button type="button" data-sk-theme="dark" aria-pressed="false" title="Always dark"
+                class="rounded p-1.5 text-slate-600 hover:text-slate-900 aria-pressed:bg-slate-100 aria-pressed:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-800 dark:aria-pressed:text-slate-100">
+          <span class="sr-only">Dark</span>
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="size-4">
+            <path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1Z" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
     </footer>
 
     <script>

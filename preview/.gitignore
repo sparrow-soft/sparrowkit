@@ -9,6 +9,12 @@
 /tmp/
 /log/
 
+# Same reason, for the credential-target tabs' own layout: they read Rails'
+# multi-environment files directly, so the Development target's key and
+# encrypted store are generated straight into config/credentials/ rather than
+# under tmp/ with the rest. Still a key nobody should commit.
+/config/credentials/
+
 # This host bundles into its own vendor/bundle, like each gem does. The root
 # .gitignore names `/vendor/` and `gems/*/vendor/`; neither reaches here.
 /vendor/

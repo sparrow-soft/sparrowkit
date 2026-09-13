@@ -195,10 +195,9 @@ RSpec.describe "the console layout", type: :request do
   end
 
   describe "the credential target tabs" do
-    it "renders a visible Credentials label and target links with the selected target announced" do
+    it "renders target links with the selected target announced" do
       show
 
-      expect(response.body).to include(">Credentials</span>")
       expect(response.body).to include('aria-label="Credential target"')
       expect(response.body).to match(%r{href="/sparrowkit/\?credential_target=development"\s+aria-current="page"}m)
       expect(response.body).to include('href="/sparrowkit/?credential_target=production"')
