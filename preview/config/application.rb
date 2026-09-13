@@ -82,5 +82,27 @@ module Preview
       key.write(ActiveSupport::EncryptedFile.generate_key)
       app.credentials.write({"secret_key_base" => "preview" * 16}.to_yaml)
     end
+
+    # The credential-target tabs read Rails' own multi-environment layout --
+    # config/credentials/development.yml.enc -- which is a different file from
+    # the single store generated above. Without this the Development tab is
+    # permanently "unavailable": there is nothing for it to open, so every
+    # panel's save button is dead on a host whose only job is exercising forms.
+    #
+    # Production is left unprovisioned on purpose: showing that tab as
+    # unavailable is the honest state for credentials nobody has created.
+    initializer "preview.credential_targets" do
+      target = SparrowUi::Console::Settings.resolve_target("development")
+      next if target.key_path.exist?
+
+      target.key_path.dirname.mkpath
+      target.key_path.write(ActiveSupport::EncryptedFile.generate_key)
+      SparrowUi::Console::Settings::TargetConfiguration.new(
+        config_path: target.content_path,
+        key_path: target.key_path,
+        env_key: "RAILS_MASTER_KEY",
+        raise_if_missing_key: false
+      ).write({}.to_yaml)
+    end
   end
 end
