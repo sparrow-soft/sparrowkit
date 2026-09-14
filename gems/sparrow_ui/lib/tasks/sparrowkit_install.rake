@@ -29,6 +29,15 @@ namespace :sparrowkit do
     # printing its own in the middle of the sequence.
     Sparrowkit::InstallOutput.umbrella!
 
+    # The console can open and edit Rails' own encrypted credentials the
+    # moment it loads, so it needs something to open. Done here, once, for
+    # every module or none -- a failed page load on the very first visit is a
+    # worse first impression than a few extra lines in an install log nobody
+    # reads unless something goes wrong.
+    Sparrowkit::InstallOutput.run("credential targets") do
+      SparrowUi::Console::Settings.ensure_target_files!
+    end
+
     installed = SPARROWKIT_MODULES.select { |constant, _task| Object.const_defined?(constant) }
 
     if installed.empty?

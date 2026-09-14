@@ -61,10 +61,16 @@ RSpec.describe "credential target selection", type: :request do
     ActionController::Base.logger = previous_controller_logger
   end
 
-  it "rejects a missing target without opening a credential store" do
+  it "defaults a missing target to development without opening a credential store" do
     allow(SparrowUi::Console::Settings).to receive(:store).and_raise("must not open")
 
     open_console
+
+    expect(response).to redirect_to("/sparrowkit/?credential_target=development")
+  end
+
+  it "still rejects a missing target when the param is present but unresolvable" do
+    open_console(credential_target: "")
 
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.body).to eq("Choose a supported credential target.")
@@ -84,6 +90,14 @@ RSpec.describe "credential target selection", type: :request do
 
     open_console
     expect(response).to have_http_status(:ok)
+  end
+
+  it "falls back to development when the session holds a stale target" do
+    open_console(credential_target: "not-a-target")
+    expect(response).to have_http_status(:unprocessable_entity)
+
+    open_console
+    expect(response).to redirect_to("/sparrowkit/?credential_target=development")
   end
 
   it "filters a submitted credential from the response, flash, and request log" do
