@@ -258,6 +258,38 @@ module SparrowUi
         INVALID_TARGET_MESSAGE
       end
 
+      # Creates the encrypted credentials and key file for every TARGET that
+      # does not already have them -- exactly what `bin/rails credentials:edit
+      # --environment NAME` would create on a first run for that environment.
+      # sparrowkit:install calls this once, so a fresh install has something
+      # the console can open rather than failing "credentials are unavailable"
+      # before anybody has typed a secret.
+      #
+      # Rails' own generators do the work rather than writing YAML by hand
+      # here: they already leave an existing file untouched, they already know
+      # development gets no secret_key_base of its own because Rails derives
+      # an insecure one from the app name (production is not allowed that
+      # fallback, so it gets a real one), and they already add the resulting
+      # key file to .gitignore. Three rules that would otherwise have to be
+      # copied here and kept in sync with whatever Rails changes them to next.
+      def ensure_target_files!
+        require "rails/generators"
+        require "rails/generators/rails/encryption_key_file/encryption_key_file_generator"
+        require "rails/generators/rails/credentials/credentials_generator"
+
+        TARGETS.each_key do |name|
+          target = resolve_target(name)
+
+          Rails::Generators::EncryptionKeyFileGenerator.new.add_key_file(target.key_path.to_s)
+
+          Rails::Generators::CredentialsGenerator.new(
+            [target.content_path.to_s, target.key_path.to_s],
+            skip_secret_key_base: name == "development",
+            quiet: true
+          ).invoke_all
+        end
+      end
+
       def with_target(target)
         previous = Thread.current[thread_target_key]
         Thread.current[thread_target_key] = target

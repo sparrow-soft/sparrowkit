@@ -11,6 +11,13 @@ module SparrowUi
     class HubController < ActionController::Base
       include CredentialTargeting
 
+      # Registered before the include's around_action runs, so a bare first
+      # visit -- no param, nothing usable in session -- redirects to a
+      # default rather than falling into CredentialTargeting's 422. A
+      # `before_action` declared here would run *inside* that around_action's
+      # chain instead, after it has already failed to resolve a target.
+      prepend_before_action :redirect_to_default_credential_target, only: :show
+
       layout "sparrow_ui/console"
 
       # Asked for rather than inherited.
@@ -100,6 +107,13 @@ module SparrowUi
       end
 
       private
+
+      def redirect_to_default_credential_target
+        return if params.key?(Settings::TARGET_PARAM)
+        return if Settings.resolve_target(session[Settings::TARGET_SESSION_KEY])
+
+        redirect_to root_path(credential_target: "development")
+      end
 
       def refuse_unavailable_target
         flash[:alert] = Settings.not_writable_reason
