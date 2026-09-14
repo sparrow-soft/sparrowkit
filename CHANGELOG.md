@@ -7,6 +7,25 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.5.2 - 2026-09-14
+
+### Added
+
+- `sparrowkit:install` now creates `config/credentials/development.yml.enc`
+  and `production.yml.enc`, and their key files, for any target that does not
+  already have them -- the same thing `bin/rails credentials:edit
+  --environment NAME` would create on a first run. A fresh install now has
+  something the console can open instead of failing "credentials are
+  unavailable" before anybody has typed a secret.
+
+### Fixed
+
+- A first, session-less visit to `/sparrowkit/` failed with "Choose a
+  supported credential target" instead of opening the console. It now
+  redirects to the Development target by default; an explicit invalid target,
+  or a stale one left over in the session, still fails safely rather than
+  silently opening the wrong store.
+
 ## 1.5.1 - 2026-09-13
 
 ### Fixed
