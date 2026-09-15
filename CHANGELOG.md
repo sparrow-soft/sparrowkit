@@ -7,6 +7,18 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.5.3 - 2026-09-14
+
+### Added
+
+- The Postmark adapter accepts an opt-in `subscription_management` setting.
+  Set to `"None"` on a stream, it turns off Postmark's own "Unsubscribe"
+  footer — a sensible default for an application with no unsubscribe handling
+  of its own, but a second "Unsubscribe" line stacked beneath a host's own for
+  one that already ships a footer link, `List-Unsubscribe` headers and
+  suppression driven by bounce and complaint webhooks. Omitted entirely
+  unless a stream sets it, so existing applications are unaffected.
+
 ## 1.5.2 - 2026-09-14
 
 ### Added

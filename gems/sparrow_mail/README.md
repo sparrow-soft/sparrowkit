@@ -47,7 +47,7 @@ silent second attempt, and it is yours to decide what happens next.
 # Not on RubyGems yet, and the four gems pin each other to an exact version, so
 # they all come from the repository in one `git` block. Comment out what you do
 # not want.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.5.2", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.5.3", glob: "gems/*/*.gemspec" do
   gem "sparrow_mail"
 end
 ```
@@ -122,6 +122,23 @@ right arrangement in production, where a role beats a stored key, and an
 adapter that demanded a key would refuse to start there. On a laptop with none
 of those, type them into the panel. A send with neither raises
 `ConfigurationError` and says so, naming both places.
+
+### Postmark
+
+Postmark models separate streams itself — `message_stream: "broadcast"` on a
+stream's `settings` sends through that stream's id rather than the account's
+default `"outbound"`/`"broadcast"` pair.
+
+Postmark's own "Unsubscribe" footer is a sensible default for an application
+with no unsubscribe handling of its own, so it ships on. A host that already
+sends its own — a footer link, `List-Unsubscribe` headers, suppression driven
+by bounce and complaint webhooks — turns Postmark's off per stream with
+`subscription_management: "None"`, or mail arrives with two "Unsubscribe"
+lines stacked one above the other:
+
+```ruby
+config.stream :broadcast, settings: {message_stream: "broadcast", subscription_management: "None"}
+```
 
 ## Sending
 
