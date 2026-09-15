@@ -7,6 +7,21 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.5.4 - 2026-09-15
+
+### Fixed
+
+- `Envelope::Address#to_s` built its `"name <email>"` string by hand
+  interpolation, so a display name containing a comma — a legal business
+  name like `"Acme, Inc."` — produced an unquoted string that Postmark's and
+  SES's own address parsers read as a list of two addresses, rejecting the
+  first for having no `@`. The raw-MIME transports (SES's body, SMTP) never
+  hit this, since they re-serialise the original `Mail::Message`, whose own
+  header writer already quotes correctly; only the JSON adapters, and SES's
+  separate `from_email_address` parameter, took `Address#to_s` directly.
+  Fixed by building through `Mail::Address` instead of a second hand-rolled
+  implementation of the same RFC 5322 quoting rule.
+
 ## 1.5.3 - 2026-09-14
 
 ### Added
