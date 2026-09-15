@@ -151,6 +151,17 @@ module SparrowMail
         metadata = metadata(envelope)
         body["Metadata"] = metadata unless metadata.empty?
 
+        # Off only when the host asks: Postmark's own "Unsubscribe" footer is
+        # a sensible default for an application with no unsubscribe handling
+        # of its own, so this is opt-in rather than assumed. A host that ships
+        # its own -- a footer link, List-Unsubscribe headers, suppression
+        # driven by bounce and complaint webhooks -- sets
+        # `subscription_management: "None"` on the stream to turn Postmark's
+        # off, or it appends a second "Unsubscribe" line beneath the host's.
+        if settings[:subscription_management]
+          body["SubscriptionManagement"] = {"UnsubscribeHandling" => settings[:subscription_management]}
+        end
+
         body
       end
 

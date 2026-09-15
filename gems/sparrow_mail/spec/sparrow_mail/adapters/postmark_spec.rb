@@ -86,6 +86,17 @@ RSpec.describe SparrowMail::Adapters::Postmark do
       expect(deliver).not_to have_key("Metadata")
     end
 
+    it "turns off Postmark's own unsubscribe footer when the stream asks" do
+      adapter = described_class.new(driver.settings.merge(subscription_management: "None"))
+      adapter.deliver!(SparrowMail::Conformance.build_message)
+
+      expect(driver.last_json["SubscriptionManagement"]).to eq({"UnsubscribeHandling" => "None"})
+    end
+
+    it "omits SubscriptionManagement entirely when the stream doesn't set one" do
+      expect(deliver).not_to have_key("SubscriptionManagement")
+    end
+
     it "base64-encodes attachments" do
       payload = deliver(attachments: {"note.txt" => "hello"})
 
