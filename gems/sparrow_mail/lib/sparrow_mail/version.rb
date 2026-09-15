@@ -4,5 +4,5 @@
 # bump VERSION and run `rake version:sync`. All SparrowKit gems release in
 # lockstep. See docs/decisions/0007-monorepo-of-gems-with-lockstep-versioning.md
 module SparrowMail
-  VERSION = "1.5.3"
+  VERSION = "1.5.4"
 end
