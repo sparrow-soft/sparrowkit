@@ -160,6 +160,37 @@ RSpec.describe SparrowMail::Envelope do
     end
   end
 
+  describe SparrowMail::Address do
+    # The regression: a name with a comma, hand-interpolated as
+    # "#{name} <#{email}>", reads to Postmark and SES alike as a list of two
+    # addresses -- "Acme" and "Inc. <email>" -- and both refuse the first for
+    # having no "@". Real business names carry commas often enough that this
+    # is not an edge case.
+    it "quotes a display name that contains a comma" do
+      address = described_class.new("no-reply@example.com", "Acme, Inc.")
+
+      expect(address.to_s).to eq('"Acme, Inc." <no-reply@example.com>')
+    end
+
+    it "leaves an ordinary display name unquoted" do
+      address = described_class.new("help@example.com", "Sparrow Support")
+
+      expect(address.to_s).to eq("Sparrow Support <help@example.com>")
+    end
+
+    it "is the bare email with no display name" do
+      address = described_class.new("help@example.com", nil)
+
+      expect(address.to_s).to eq("help@example.com")
+    end
+
+    it "is the bare email when the display name is blank" do
+      address = described_class.new("help@example.com", "")
+
+      expect(address.to_s).to eq("help@example.com")
+    end
+  end
+
   describe "never logging message bodies" do
     it "redacts the bodies from #inspect" do
       envelope = build_envelope

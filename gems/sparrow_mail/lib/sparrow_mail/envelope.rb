@@ -6,8 +6,22 @@ require "json"
 module SparrowMail
   # A single email address plus its optional display name.
   Address = Struct.new(:email, :name) do
+    # Through Mail::Address rather than hand-interpolated, because a name
+    # is author-supplied text, not a token: "Acme, Inc." <bare interpolation
+    # produced> read by Postmark and SES alike as two addresses, "Acme" and
+    # "Inc. <email>", and refused the first for having no "@". Mail::Address
+    # already carries the RFC 5322 quoting rule -- wrap the name in double
+    # quotes when it holds a comma or any other character a header would
+    # otherwise read as a separator -- which is the same class this gem
+    # already trusts to build the raw-MIME path's headers correctly. Two
+    # implementations of one quoting rule is how they drift, which is exactly
+    # what happened here: the raw-MIME path already got this right.
     def to_s
-      (name && !name.empty?) ? "#{name} <#{email}>" : email.to_s
+      return email.to_s if name.nil? || name.empty?
+
+      address = ::Mail::Address.new(email.to_s)
+      address.display_name = name
+      address.format
     end
   end
 
