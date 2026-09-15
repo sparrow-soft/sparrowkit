@@ -21,7 +21,7 @@ gem "puma", "~> 6.0"
 # ArgumentError (wrong number of arguments) the moment a browser sends back
 # a cookie. Pin to the 2.x line bundler would have picked before json 3.0
 # existed, until activesupport catches up.
-gem "json", "< 3.0"
+gem "json", "< 4.0"
 
 # PostgreSQL, and SQLite will not do.
 #
