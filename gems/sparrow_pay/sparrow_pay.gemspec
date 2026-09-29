@@ -88,5 +88,5 @@ Gem::Specification.new do |spec|
   #
   # Pinned to the major version rather than exactly, because unlike the sparrow
   # gems this one is not released in lockstep with us.
-  spec.add_dependency "pay", "~> 11.0"
+  spec.add_dependency "pay", ">= 11", "< 13"
 end
