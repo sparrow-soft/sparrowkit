@@ -37,7 +37,8 @@ module SparrowAuth
   #     having a bad day must not become an oracle;
   #   * the account created when a code is REDEEMED, never when one is issued,
   #     because anybody can ask for a code for any address;
-  #   * rate limits on the address and on the caller, both.
+  #   * rate limits on the address and on the caller, both;
+  #   * nothing at all sent to a Tor exit (see TorExits), answered the same.
   #
   # A page that got any one of those wrong would look exactly like a page that
   # got them right. That is the argument for the seam being here.
@@ -76,6 +77,13 @@ module SparrowAuth
     def request(email:, ip:, base_url: nil)
       address = OneTimeCode.normalize_email(email)
       return SecureRandom.hex(32) if address.blank?
+
+      # Before the rate limiter, so a spray from Tor spends nobody's budget --
+      # least of all that of the person whose address it is typing.
+      if TorExits.include?(ip)
+        SparrowAuth.logger&.info("[sparrow_auth] tor_exit_skipped")
+        return SecureRandom.hex(32)
+      end
 
       within_budget = RateLimiter.allow!(
         "otp_send:email" => address,

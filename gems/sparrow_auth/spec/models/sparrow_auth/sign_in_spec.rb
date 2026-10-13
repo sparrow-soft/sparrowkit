@@ -77,6 +77,29 @@ RSpec.describe SparrowAuth::SignIn do
 
   # The heart of it. Whether an address has an account is not a question this
   # answers, by return value, by exception, or by what it sends.
+  describe "from a Tor exit" do
+    before { list_tor_exit }
+
+    it "sends nothing, and returns what every other request returns" do
+      verified_account
+
+      tor = request_code(from: BotProtectionHelpers::TOR_EXIT)
+
+      expect(SparrowMail.deliveries).to be_empty
+      expect(observable(tor)).to eq(observable(request_code))
+    end
+
+    # The spray typed other people's addresses. Spending their budget would
+    # stop the real person signing in.
+    it "spends nobody's rate-limit budget" do
+      verified_account
+
+      10.times { request_code(from: BotProtectionHelpers::TOR_EXIT) }
+
+      expect { request_code }.to change { SparrowMail.deliveries.size }.by(1)
+    end
+  end
+
   describe "anti-enumeration" do
     it "answers an unknown address exactly as it answers a known one" do
       verified_account

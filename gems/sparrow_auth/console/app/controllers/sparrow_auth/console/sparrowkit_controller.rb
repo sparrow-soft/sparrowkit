@@ -70,7 +70,7 @@ module SparrowAuth
       # SparrowAuth::Configuration takes, and never stored apart.
       TEXT = [
         :webauthn_rp_id, :webauthn_rp_name, :sender_name, :sender_email,
-        :otp_secret
+        :otp_secret, :turnstile_site_key, :turnstile_secret_key
       ].freeze
 
       # The two shapes emailed sign-in comes in, as a radio rather than two
@@ -252,10 +252,24 @@ module SparrowAuth
       end
 
       # Masked: presence and last four characters for anything whose name reads
-      # like a secret, at every depth. Nothing else in this controller reads
-      # credentials, so there is no path by which a stored secret reaches a view.
+      # like a secret, at every depth. The only other read of credentials in
+      # this controller is `stored_turnstile_site_key` below, which takes one
+      # named public value and nothing else, so there is no path by which a
+      # stored secret reaches a view.
       def stored_tree
         @stored_tree ||= settings.for_display(MODULE_KEY)
+      end
+
+      # The Turnstile site key as stored, unmasked, and on purpose.
+      #
+      # Its name contains "key", so `for_display` masks it like any secret and
+      # the box would come back empty after every save, with no way to see
+      # which site key is in use. It is not a secret: Cloudflare designs it to
+      # be printed into every page that shows the widget. So this one value is
+      # read by name from the raw tree. Nothing else is, and the secret key
+      # beside it still goes through the mask.
+      def stored_turnstile_site_key
+        settings.read(MODULE_KEY)[:turnstile_site_key].to_s
       end
 
       # The engine's own defaults, for a switch nothing has been stored for yet.
@@ -464,6 +478,14 @@ module SparrowAuth
 
         @otp_secret = stored_tree[:otp_secret]
 
+        # Bot protection. The site key reads back like any other line of text;
+        # the secret key only ever as set or not set, never a value and never
+        # its last four characters, the same as a social client secret.
+        @stored_turnstile_site_key = stored_turnstile_site_key
+        @turnstile_site_key = typed(:turnstile_site_key) || @stored_turnstile_site_key
+        stored_turnstile_secret = stored_tree[:turnstile_secret_key]
+        @turnstile_secret_set = stored_turnstile_secret.is_a?(Hash) && stored_turnstile_secret[:set]
+
         # What is STORED, not what is live. Credentials become configuration in
         # an engine initializer, which runs at boot -- so between a save and a
         # restart the two disagree, and the page a developer is looking at
@@ -545,7 +567,40 @@ module SparrowAuth
           # provider off rather than leaving an empty pair behind for
           # `social?` to count as configured.
           social_providers: social_providers.presence
-        }
+        }.merge(turnstile_attributes)
+      end
+
+      # The two Turnstile keys, which are saved as a pair the way a social
+      # provider's are.
+      #
+      # Both names match the secret mask, so Settings.write drops a blank value
+      # for either rather than writing it. For the secret key that is the rule
+      # every secret box on this page relies on: the box cannot show what is
+      # stored, so blank means keep it. For the site key it would mean the box
+      # could never be emptied, so a blank site key is sent as `nil`, which is
+      # how Settings.write deletes.
+      #
+      # Emptying the site key box, with nothing typed into the secret box (which
+      # always renders empty), is the way to turn Turnstile off, and it removes
+      # the secret key too, for the same reason clearing a social provider
+      # removes its secret: a secret left behind with nothing beside it is a key
+      # nobody meant to keep.
+      #
+      # Nothing at all when the request did not carry the site key box. The
+      # page always sends it, so its absence is a hand-made request, and a
+      # stored secret is not something to erase on the strength of a field that
+      # was never rendered.
+      def turnstile_attributes
+        return {} unless params.key?(:turnstile_site_key)
+
+        site_key = scalar(:turnstile_site_key)
+        secret_key = scalar(:turnstile_secret_key)
+
+        if site_key.empty? && secret_key.empty?
+          {turnstile_site_key: nil, turnstile_secret_key: nil}
+        else
+          {turnstile_site_key: site_key.presence, turnstile_secret_key: secret_key}
+        end
       end
 
       # Said on the way out as well as on the page, because a save redirects and

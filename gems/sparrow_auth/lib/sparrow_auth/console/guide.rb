@@ -71,6 +71,7 @@ module SparrowAuth
           - Passwords: #{on_off(:passwords_enabled)}
           - Auth email is sent from: #{value(:mail_from)}
           - One-time code signing key: #{stored[:otp_secret].present? ? "set" : "derived by Rails, which is fine"}
+          - Cloudflare Turnstile on forms that send mail to a typed address: #{turnstile}
 
           What you get:
           - The engine is mounted at /auth and serves Rodauth's pages there:
@@ -157,6 +158,14 @@ module SparrowAuth
       # secret mask, so it is stored by being there. See the panel controller.
       def on_off(name)
         (stored.key?(name) && !!stored[name]) ? "on" : "off"
+      end
+
+      # On only when both keys are stored, which is the rule
+      # SparrowAuth::Configuration#turnstile? applies. Says whether, never what:
+      # one of the two is a secret.
+      def turnstile
+        on = stored[:turnstile_site_key].present? && stored[:turnstile_secret_key].present?
+        on ? "on" : "off"
       end
 
       # A code somebody types, or a link they open -- one or the other, never

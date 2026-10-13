@@ -68,6 +68,19 @@ module SparrowAuth
       webauthn_credentials.exists?
     end
 
+    # Whether to offer this account a passkey: it has none, and has not said
+    # "Not now". Ask it after a sign-in by emailed code, and show the offer
+    # instead of the page the person was going to.
+    def passkey_prompt_due?
+      passkey_prompt_dismissed_at.nil? && !passkey?
+    end
+
+    # "Not now". Remembered on the account, so the question is asked once per
+    # person rather than once per browser.
+    def dismiss_passkey_prompt!
+      update!(passkey_prompt_dismissed_at: Time.current)
+    end
+
     def membership_in(organization)
       return nil if organization.nil?
 

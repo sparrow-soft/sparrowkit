@@ -29,6 +29,20 @@ module SparrowAuth
     # is true no matter which branch actually ran.
     RESEND_NOTICE = "If that address has an account awaiting confirmation, another email is on its way."
 
+    # The Turnstile actions for the two Rodauth pages that send mail to a typed
+    # address. Distinct from each other and from the application's own forms,
+    # so a token solved on one is refused on another.
+    TURNSTILE_SIGNUP = "create_account"
+    TURNSTILE_RESEND = "resend_confirmation"
+
+    # Where to go after a passkey is added, carried from the link that opened
+    # the setup page. See before_webauthn_setup_route.
+    PASSKEY_RETURN_TO = "sparrow_auth_passkey_return_to"
+
+    PASSKEY_SIGN_IN_JS = File.read(
+      File.expand_path("../../javascript/sparrow_auth/passkey_sign_in.js", __dir__)
+    ).freeze
+
     # A hash for the sign-in path to compare against when there is no account,
     # so that path costs what the other one costs. See after_no_matching_login.
     #
@@ -155,6 +169,9 @@ module SparrowAuth
       webauthn_auth_button "Use your passkey"
       webauthn_auth_link_text "Use your passkey"
 
+      webauthn_setup_notice_flash "Passkey added. Next time, sign in with it instead of a code."
+      webauthn_remove_notice_flash "Passkey removed."
+
       webauthn_remove_page_title "Remove a passkey"
       webauthn_remove_button "Remove this passkey"
       webauthn_remove_link_text "Remove a passkey"
@@ -246,6 +263,23 @@ module SparrowAuth
       # being avoided.
       before_create_account_route do
         login = param(login_param)
+
+        if request.post?
+          # Turnstile first, and out loud: it is a question about the browser,
+          # so the answer is the same for every address. See
+          # SparrowAuth::Turnstile.
+          unless sparrow_auth_passed_turnstile?(SparrowAuth::RodauthMain::TURNSTILE_SIGNUP)
+            set_redirect_error_flash SparrowAuth::Turnstile::REFUSAL_MESSAGE
+            redirect create_account_path
+          end
+
+          # A Tor exit gets what a new address gets, and no mail and no account.
+          # See SparrowAuth::TorExits.
+          if sparrow_auth_tor_exit?
+            set_notice_flash create_account_notice_flash
+            redirect create_account_redirect
+          end
+        end
 
         if request.post? && !login.to_s.empty? && account_from_login(login)
           SparrowAuth::Mailer.account_exists(email: login).deliver_now rescue nil # rubocop:disable Style/RescueModifier
@@ -696,8 +730,13 @@ module SparrowAuth
         if request.post?
           login = param(login_param)
 
+          unless sparrow_auth_passed_turnstile?(SparrowAuth::RodauthMain::TURNSTILE_RESEND)
+            set_redirect_error_flash SparrowAuth::Turnstile::REFUSAL_MESSAGE
+            redirect verify_account_resend_path
+          end
+
           begin
-            if !login.to_s.empty? && account_from_login(login) &&
+            if !login.to_s.empty? && !sparrow_auth_tor_exit? && account_from_login(login) &&
                 allow_resending_verify_account_email? && !verify_account_email_recently_sent?
               before_verify_account_email_resend
               verify_account_email_resend
@@ -714,6 +753,105 @@ module SparrowAuth
           redirect login_path
         end
       end
+
+      # The Turnstile widget on the two Rodauth pages above, through the hook
+      # Rodauth's own templates (and rodauth-rails' generated ones) leave for
+      # exactly this. An application that overrides either template has to keep
+      # the line that renders it. Empty while Turnstile is off.
+      create_account_additional_form_tags do
+        SparrowAuth::Turnstile.widget(action: SparrowAuth::RodauthMain::TURNSTILE_SIGNUP)
+      end
+
+      verify_account_resend_additional_form_tags do
+        SparrowAuth::Turnstile.widget(action: SparrowAuth::RodauthMain::TURNSTILE_RESEND)
+      end
+
+      auth_class_eval do
+        def sparrow_auth_passed_turnstile?(action)
+          return true unless SparrowAuth::Turnstile.enabled?
+
+          SparrowAuth::Turnstile.verify(
+            token: param_or_nil(SparrowAuth::Turnstile::TOKEN_FIELD),
+            action: action,
+            hostname: request.host,
+            remote_ip: sparrow_auth_remote_ip
+          )
+        end
+
+        def sparrow_auth_tor_exit?
+          SparrowAuth::TorExits.include?(sparrow_auth_remote_ip)
+        end
+
+        # The address Rails worked out, which honours trusted proxies and
+        # anything an application put in front of ActionDispatch::RemoteIp.
+        # Rack's own request.ip does neither, and behind a load balancer it is
+        # the balancer.
+        def sparrow_auth_remote_ip
+          (request.env["action_dispatch.remote_ip"] || request.ip).to_s
+        end
+      end
+
+      # Asking for a sign-in link goes through SparrowAuth::SignIn, never
+      # through Rodauth's own route -- see the long comment where email_auth is
+      # enabled. The route still existed, though, and answered a POST from
+      # anybody: a link sent to any registered address with none of SignIn's
+      # rate limits, and a different flash for an address it did not know,
+      # which is an enumeration oracle. SignIn reaches it as an internal
+      # request, so only that is let through.
+      before_email_auth_request_route do
+        unless internal_request?
+          response.status = 404
+          request.halt
+        end
+      end
+
+      # After a passkey is added, back to where the person came from rather
+      # than to "/". Link to the setup page with ?return_to=/your/profile and
+      # they land there, with the "Passkey added" notice still in the flash --
+      # a redirect through "/" to a dashboard spends the flash on the way and
+      # the person is never told it worked.
+      #
+      # Only a path on this site is accepted, by Rodauth's own rule (a leading
+      # single slash, bounded length), so the parameter cannot send anybody
+      # elsewhere.
+      before_webauthn_setup_route do
+        return_to = param_or_nil("return_to")
+        if request.get? && return_to && valid_return_to_path?(return_to)
+          session[SparrowAuth::RodauthMain::PASSKEY_RETURN_TO] = return_to
+        end
+      end
+
+      webauthn_setup_redirect do
+        session.delete(SparrowAuth::RodauthMain::PASSKEY_RETURN_TO) || default_redirect
+      end
+
+      # A passkey that did not work goes back to the sign-in screen the person
+      # was on, which shows its alerts. Rodauth's default is its own
+      # /auth/login, which with passwords off is a page most applications never
+      # style and some never show a flash on.
+      #
+      # "The screen they were on" is the page that posted here, when it is a
+      # page of this site -- an application can have more than one sign-in
+      # screen. Anything else falls back to sign_in_path.
+      webauthn_login_failure_redirect do
+        referer = URI.parse(request.referer.to_s) rescue nil # rubocop:disable Style/RescueModifier
+        same_site = referer&.host.nil? || referer.host == request.host
+        path = referer&.path.to_s
+
+        if same_site && !path.empty? && valid_return_to_path?(path) && !path.start_with?(prefix)
+          path
+        else
+          SparrowAuth.config.sign_in_path
+        end
+      end
+      webauthn_login_error_flash "That passkey didn’t work. Try again, or use your email address."
+
+      # The script behind rodauth.render("webauthn-autofill"), replaced with one
+      # that does what Rodauth's does -- offer passkeys in the email field's
+      # autofill -- and also drives a "Sign in with a passkey" button, sharing
+      # one challenge and cancelling the autofill request before the button's
+      # starts. See app/javascript/sparrow_auth/passkey_sign_in.js.
+      webauthn_autofill_js SparrowAuth::RodauthMain::PASSKEY_SIGN_IN_JS
 
       email_auth_table :sparrow_auth_email_auth_keys
 

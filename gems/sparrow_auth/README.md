@@ -196,6 +196,13 @@ application needs instead is one account to test with, and
 |---|---|---|
 | `organization_for_request` | built-in | Decides which organization the current request is for. The default takes an explicit choice from the session, then the account's only membership if it has exactly one, and never guesses between several. |
 
+### Bot protection
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `turnstile_site_key` | none | The public key of a Cloudflare Turnstile widget. Set it in the control panel with the secret key below; with both set, every form that sends mail to a typed address asks Cloudflare whether a person filled it in. See [Bot protection](#bot-protection). |
+| `turnstile_secret_key` | none | The widget's secret key, which never leaves the server. Turnstile stays off until both are set. |
+
 ### Rarely changed
 
 | Setting | Default | Meaning |
@@ -287,6 +294,90 @@ you the models and the request-level tenancy, and stops there:
 They are generated rather than served because every one of them carries your
 navigation, your words and your styling. A page shipped from a gem is a page
 you would replace on the first afternoon.
+
+## Your sign-in screen
+
+The screen is yours, but four things on it are the same in every application,
+and the engine supplies the part of each that is easy to get wrong.
+
+**A passkey button, and passkeys in the email field's autofill.** Render
+Rodauth's autofill form on the page, mark the email field `webauthn`, and add a
+button and an error line with the two data attributes below. Both start
+`hidden`; the button appears once the browser can do WebAuthn at all.
+
+```erb
+<button type="button" data-sparrow-auth-passkey hidden>Sign in with a passkey</button>
+<p data-sparrow-auth-passkey-error hidden>
+  Passkey sign-in didn't work in this browser. Use your email address instead.
+</p>
+<%= rodauth.render("webauthn-autofill") %>
+
+<%= form_with url: sign_in_path do |form| %>
+  <%= form.email_field :email, autocomplete: "email webauthn" %>
+  ...
+<% end %>
+```
+
+The script behind that partial offers passkeys in the field's autofill and opens
+the passkey prompt when the button is clicked, from the same challenge, and
+cancels the one before starting the other. Neither asks the server anything, so
+neither says which addresses have a passkey. Cancelling the prompt is silent;
+any other failure shows the error line. A passkey the server refuses comes back
+to the sign-in screen it was used on (or `sign_in_path`) with an alert, so show
+`flash[:alert]` there.
+
+**Turnstile.** With `turnstile_site_key` and `turnstile_secret_key` set, check
+every form of yours that sends mail to a typed address -- the sign-in screen and
+any sign-up screen -- before calling `SparrowAuth::SignIn.request`:
+
+```erb
+<%= SparrowAuth::Turnstile.widget(action: "login") %>
+<%= form.submit "Send me a code" %>
+```
+
+```ruby
+unless SparrowAuth::Turnstile.passed?(request, action: "login")
+  return redirect_to sign_in_path, alert: SparrowAuth::Turnstile::REFUSAL_MESSAGE
+end
+```
+
+Use a different `action` on each form, so a token solved on one is refused on
+another. The widget is invisible unless Cloudflare wants an interaction, holds
+the form's submit button until it has a token, and draws nothing while
+Turnstile is off. Each token is good once. Rodauth's own create-account and
+resend-confirmation pages are checked for you, through
+`create_account_additional_form_tags` and
+`verify_account_resend_additional_form_tags` (with the actions
+`create_account` and `resend_confirmation`, so use other names on your own forms); if you generate your own copies of
+those templates, keep the line that renders them.
+
+With a Content Security Policy, allow Cloudflare in two places:
+
+```ruby
+policy.script_src :self, "https://challenges.cloudflare.com"
+policy.frame_src  :self, "https://challenges.cloudflare.com"
+```
+
+Saying out loud that the check failed is safe, unlike everything else on this
+path: it is a question about the browser, and the answer is the same for every
+address.
+
+**Tor.** `SignIn.request` sends nothing to a Tor exit and answers it exactly as
+it answers everybody else. The list comes from the Tor Project and lives in
+`Rails.cache`; schedule `SparrowAuth::RefreshTorExitsJob` hourly with whatever
+runs your recurring jobs. Until it has run once, nothing is listed.
+
+**Offering a passkey.** After a sign-in by emailed code, show a one-time card
+offering a passkey instead of the page the person was going to, when
+`current_account.passkey_prompt_due?`. It links to `/auth/webauthn-setup`
+(add `?return_to=/a/path/of/yours` to any link to that page and the person
+comes back there afterwards, with the "Passkey added" notice), and
+"Not now" calls `current_account.dismiss_passkey_prompt!`, which is remembered
+on the account. On a profile page, list `current_account.webauthn_credentials`
+(each has `display_name`, `created_at` and `last_use`), and remove one with
+`current_account.webauthn_credentials.find_by(webauthn_id: params[:id])&.destroy`
+-- the id travels in the body, not the path, because it is base64url and the
+router would read a dot in it as a format.
 
 ## Using it
 
@@ -444,7 +535,8 @@ later does not start having its counters deleted underneath it.
   `/auth`; everything else is yours to write against the models above.
 - **Rate limits are per address and per IP**, so they are not a defence against
   a large distributed attack. They stop the cheap one, which is the one that
-  happens.
+  happens. Turnstile and the Tor list are the answer to the distributed one, and
+  Turnstile is off until you set its keys.
 - **What customers do is not logged.** Staff activity is; there is no equivalent
   on the customer side.
 

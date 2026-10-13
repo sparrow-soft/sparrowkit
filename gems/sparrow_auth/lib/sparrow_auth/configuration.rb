@@ -311,6 +311,21 @@ module SparrowAuth
       @webauthn_rp_name || SparrowAuth.application_name.presence
     end
 
+    # Cloudflare Turnstile, the check that a form which sends mail to a typed
+    # address was filled in by a browser with a person at it. Both keys come
+    # from the Turnstile widget in the Cloudflare dashboard; the site key is
+    # public and goes into the page, the secret key never leaves the server.
+    #
+    # Off until both are set, so development and a test suite see every form
+    # as it always was and make no third-party round trip. See
+    # SparrowAuth::Turnstile.
+    attr_accessor :turnstile_site_key
+    attr_accessor :turnstile_secret_key
+
+    def turnstile?
+      turnstile_site_key.present? && turnstile_secret_key.present?
+    end
+
     # How to work out which organization the current request is for.
     #
     # Called with the controller. Returning nil means no organization is in
@@ -368,6 +383,8 @@ module SparrowAuth
       @webauthn_origin = nil
       @webauthn_rp_id = nil
       @webauthn_rp_name = nil
+      @turnstile_site_key = nil
+      @turnstile_secret_key = nil
     end
 
     # Social sign-in needs both a host that asked for it and the gems to do it.

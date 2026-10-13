@@ -7,6 +7,51 @@ released in lockstep at one version.
 
 ## Unreleased
 
+### Added
+
+- Cloudflare Turnstile. Set `turnstile_site_key` and `turnstile_secret_key`
+  (the control panel has fields for both) and Rodauth's create-account and
+  resend-confirmation pages check that a person filled them in. An
+  application's own sign-in and sign-up screens render
+  `SparrowAuth::Turnstile.widget(action:)` and call
+  `SparrowAuth::Turnstile.passed?(request, action:)` before
+  `SignIn.request`. Each token is good once, checked against the action and
+  the host, and anything Cloudflare does not vouch for fails closed. Off until
+  both keys are set.
+- `SignIn.request` sends nothing to a Tor exit node, answers it as it answers
+  everybody, and spends nobody's rate-limit budget on it. The list is
+  refreshed by `SparrowAuth::RefreshTorExitsJob`, which an application
+  schedules hourly; until it has run, nothing is listed. Rodauth's
+  create-account and resend pages skip Tor exits the same way.
+- A "Sign in with a passkey" button. The script behind
+  `rodauth.render("webauthn-autofill")` now also drives any element marked
+  `data-sparrow-auth-passkey`, sharing the autofill's challenge and cancelling
+  the autofill request before opening the prompt, which Rodauth's own script
+  left pending.
+- `Account#passkey_prompt_due?` and `Account#dismiss_passkey_prompt!`, for a
+  one-time offer of a passkey after a sign-in by emailed code. Needs the new
+  migration (`bin/rails sparrow_auth:install` copies it).
+
+### Changed
+
+- A passkey the server refuses now returns to the sign-in screen it came from
+  (or `sign_in_path`) with an alert
+  ("That passkey didn't work. Try again, or use your email address.") instead
+  of Rodauth's `/auth/login`, where most applications show no flash.
+- `/auth/webauthn-setup?return_to=/a/path` returns there after the passkey is
+  added, instead of to `/`, so the "Passkey added" notice is not spent on a
+  redirect. Only a path on the same site is accepted.
+- Adding a passkey says "Passkey added. Next time, sign in with it instead of
+  a code." rather than Rodauth's "WebAuthn authentication is now setup".
+
+### Security
+
+- Rodauth's own `POST /auth/email-auth-request` answered anybody. It sent a
+  sign-in link to any registered address with none of `SignIn`'s rate limits,
+  and answered an unknown address with a different flash, which told a caller
+  which addresses have accounts. `SignIn` reaches it as an internal request,
+  which is all that is now let through.
+
 ## 1.5.4 - 2026-09-15
 
 ### Fixed

@@ -107,6 +107,46 @@ are off by default (`config.passwords_enabled`).
 Because Rodauth is middleware, its paths do **not** follow your engine mount
 point. `config.path_prefix` and your routes have to be told to agree.
 
+### The sign-in screen
+
+Yours to write, with four pieces from the engine. The gem README's "Your
+sign-in screen" has the markup.
+
+```erb
+<button type="button" data-sparrow-auth-passkey hidden>Sign in with a passkey</button>
+<p data-sparrow-auth-passkey-error hidden>Passkey sign-in didn't work here.</p>
+<%= rodauth.render("webauthn-autofill") %>   <%# drives the button and autofill %>
+
+<%= form_with url: sign_in_path do |form| %>
+  <%= form.email_field :email, autocomplete: "email webauthn" %>
+  <%= SparrowAuth::Turnstile.widget(action: "login") %>
+  <%= form.submit "Send me a code" %>
+<% end %>
+```
+
+```ruby
+def create
+  unless SparrowAuth::Turnstile.passed?(request, action: "login")
+    return redirect_to sign_in_path, alert: SparrowAuth::Turnstile::REFUSAL_MESSAGE
+  end
+
+  request_id = SparrowAuth::SignIn.request(
+    email: params[:email], ip: request.remote_ip, base_url: request.base_url
+  )
+  # set the request cookie and redirect, the same way whatever happened
+end
+```
+
+- Turnstile is off until `turnstile_site_key` and `turnstile_secret_key` are
+  set. Use a different `action` per form. Rodauth's create-account and resend
+  pages are checked for you.
+- `SignIn.request` sends nothing to a Tor exit and does not say so. Schedule
+  `SparrowAuth::RefreshTorExitsJob` hourly.
+- After a sign-in by emailed code, offer a passkey once when
+  `current_account.passkey_prompt_due?`; "Not now" is
+  `current_account.dismiss_passkey_prompt!`.
+- A refused passkey comes back to `sign_in_path` with `flash[:alert]`.
+
 ### Tenancy — the part that matters most
 
 Two includes. First, in your `ApplicationController`:
