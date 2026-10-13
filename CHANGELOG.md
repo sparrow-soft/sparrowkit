@@ -7,6 +7,8 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.6.0 - 2026-10-13
+
 ### Added
 
 - Cloudflare Turnstile. Set `turnstile_site_key` and `turnstile_secret_key`
