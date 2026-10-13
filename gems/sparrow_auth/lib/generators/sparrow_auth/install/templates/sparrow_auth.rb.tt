@@ -216,6 +216,9 @@ SparrowAuth.configure do |config|
   #                       creates an account
   #   passwords_enabled   whether passwords exist at all
   #   otp_secret          signing key for one-time codes
+  #   turnstile_site_key  Cloudflare Turnstile's public key, and its secret:
+  #   turnstile_secret_key  with both set, every form that sends mail to a
+  #                       typed address checks that a person filled it in
   #
   # The signing key is optional. Left unset it is derived through Rails' key
   # generator, which is stable across boots and distinct from every other
