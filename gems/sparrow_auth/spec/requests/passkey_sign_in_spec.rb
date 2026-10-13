@@ -84,11 +84,16 @@ RSpec.describe "passkey sign-in", type: :request do
       expect(flash[:notice]).to start_with("Passkey added.")
     end
 
-    it "will not go anywhere but this site" do
-      register_and_sign_in
-      enroll_from("//evil.example/steal")
+    # Browsers read a backslash as a slash and drop a tab, so "/\\evil.example"
+    # and "/\t/evil.example" are "//evil.example": another site.
+    ["//evil.example/steal", "/\\evil.example/steal", "/\\/evil.example",
+      "https://evil.example/", "/\t/evil.example"].each do |target|
+      it "will not go to #{target.inspect}" do
+        register_and_sign_in
+        enroll_from(target)
 
-      expect(response.location).not_to include("evil.example")
+        expect(response.location).not_to include("evil.example")
+      end
     end
   end
 

@@ -778,6 +778,17 @@ module SparrowAuth
           )
         end
 
+        # A path on this site, and nothing a browser could read as another
+        # one. Rodauth's valid_return_to_path? refuses "//evil.example" but
+        # not "/\evil.example", which browsers treat as the same thing, so it
+        # is not enough on its own for a redirect target somebody else chose.
+        # A backslash, whitespace or a control character anywhere is refused.
+        def sparrow_auth_local_path?(path)
+          path.is_a?(String) &&
+            valid_return_to_path?(path) &&
+            !path.match?(/[\\\s[:cntrl:]]/)
+        end
+
         def sparrow_auth_tor_exit?
           SparrowAuth::TorExits.include?(sparrow_auth_remote_ip)
         end
@@ -811,12 +822,11 @@ module SparrowAuth
       # a redirect through "/" to a dashboard spends the flash on the way and
       # the person is never told it worked.
       #
-      # Only a path on this site is accepted, by Rodauth's own rule (a leading
-      # single slash, bounded length), so the parameter cannot send anybody
-      # elsewhere.
+      # Only a path on this site is accepted -- see sparrow_auth_local_path? --
+      # so the parameter cannot send anybody elsewhere.
       before_webauthn_setup_route do
         return_to = param_or_nil("return_to")
-        if request.get? && return_to && valid_return_to_path?(return_to)
+        if request.get? && sparrow_auth_local_path?(return_to)
           session[SparrowAuth::RodauthMain::PASSKEY_RETURN_TO] = return_to
         end
       end
@@ -838,7 +848,7 @@ module SparrowAuth
         same_site = referer&.host.nil? || referer.host == request.host
         path = referer&.path.to_s
 
-        if same_site && !path.empty? && valid_return_to_path?(path) && !path.start_with?(prefix)
+        if same_site && sparrow_auth_local_path?(path) && !path.start_with?(prefix)
           path
         else
           SparrowAuth.config.sign_in_path
