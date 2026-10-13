@@ -49,7 +49,7 @@ and cannot be signed in.
 # Not on RubyGems yet, and the gems pin each other to an exact version, so they
 # come from the repository in one `git` block. The glob lets Bundler resolve
 # sparrow_mail from the same source, which sparrow_auth requires.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.6.0", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.6.1", glob: "gems/*/*.gemspec" do
   gem "sparrow_auth"
 end
 ```
@@ -325,6 +325,19 @@ neither says which addresses have a passkey. Cancelling the prompt is silent;
 any other failure shows the error line. A passkey the server refuses comes back
 to the sign-in screen it was used on (or `sign_in_path`) with an alert, so show
 `flash[:alert]` there.
+
+A passkey that works signs the person in and sends them to `/`, unless the
+screen said otherwise. Say where your emailed-code flow would send them, in the
+action that renders the screen:
+
+```ruby
+def new
+  rodauth.passkey_sign_in_return_to = dashboard_path
+end
+```
+
+Only a path on your own site is accepted. Without it, a sign-in by passkey
+lands on `/`, which is wrong for an application whose root is a public home page.
 
 **Turnstile.** With `turnstile_site_key` and `turnstile_secret_key` set, check
 every form of yours that sends mail to a typed address -- the sign-in screen and

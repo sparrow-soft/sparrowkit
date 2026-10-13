@@ -9,6 +9,13 @@ RSpec.describe "passkey sign-in", type: :request do
   let(:email) { "newcomer@example.org" }
   let(:password) { "correct horse battery staple" }
 
+  def signed_in?
+    get "/account-settings"
+    response.status == 200
+  rescue SparrowAuth::UnverifiedAccount
+    false
+  end
+
   describe "the script" do
     it "replaces Rodauth's autofill script with one that also drives a button" do
       get "/auth/webauthn-autofill-js"
@@ -94,6 +101,51 @@ RSpec.describe "passkey sign-in", type: :request do
 
         expect(response.location).not_to include("evil.example")
       end
+    end
+  end
+
+  describe "where a passkey sign-in lands" do
+    def enrolled_and_signed_out
+      post "/auth/create-account", params: {login: email, password: password, "password-confirm": password}
+      url = SparrowMail.deliveries.last.text_body[%r{https?://\S+}]
+      key = URI.decode_www_form(URI.parse(url).query.to_s).to_h["key"]
+      get "/auth/verify-account", params: {key: key}
+      post "/auth/verify-account", params: {key: key}
+      enroll_passkey
+      post "/auth/logout"
+    end
+
+    def passkey_sign_in_from(page)
+      get page
+      challenge = field_value(response.body, "webauthn_auth_challenge")
+      hmac = field_value(response.body, "webauthn_auth_challenge_hmac")
+      post "/auth/webauthn-login", params: {
+        webauthn_auth: authenticator.get(challenge: challenge, user_verified: true).to_json,
+        webauthn_auth_challenge: challenge,
+        webauthn_auth_challenge_hmac: hmac
+      }
+    end
+
+    it "lands where the sign-in screen said" do
+      enrolled_and_signed_out
+      passkey_sign_in_from("/trade/sign-in")
+
+      expect(response).to redirect_to("/account-settings")
+      expect(signed_in?).to be(true)
+    end
+
+    it "lands on / when the screen said nothing" do
+      enrolled_and_signed_out
+      passkey_sign_in_from("/auth/login")
+
+      expect(response).to redirect_to("/")
+    end
+
+    it "lands on / rather than on another site" do
+      enrolled_and_signed_out
+      passkey_sign_in_from("/trade/sign-in?land=%2F%5Cevil.example")
+
+      expect(response).to redirect_to("/")
     end
   end
 

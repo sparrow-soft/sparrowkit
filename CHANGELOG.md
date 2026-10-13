@@ -7,6 +7,18 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.6.1 - 2026-10-13
+
+### Fixed
+
+- A sign-in by passkey always landed on `/`, because Rodauth signs the person
+  in and redirects there itself. That is right where `/` sends a signed-in
+  person into the app, and wrong where `/` is a public home page or several apps
+  share one sign-in -- the person was signed in and left on the home page.
+  The screen that renders the passkey form now says where to go:
+  `rodauth.passkey_sign_in_return_to = dashboard_path`. Only a path on the
+  same site is accepted; without it, a passkey sign-in still lands on `/`.
+
 ## 1.6.0 - 2026-10-13
 
 ### Added

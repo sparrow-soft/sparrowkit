@@ -30,6 +30,7 @@ Rails.application.routes.draw do
   post "mailbox/clear", to: "smoke#clear_mailbox", as: :clear_mailbox
   post "rate-limits/clear", to: "smoke#clear_rate_limits", as: :clear_rate_limits
   post "passkey-offer/decline", to: "smoke#decline_passkey", as: :decline_passkey
+  get "trade/sign-in", to: "smoke#trade_sign_in"
 
   # A page behind SparrowAuth::RequiresLiveSession. The engine's own management
   # pages are gone — an application generates their own — so the concern needs a host
