@@ -43,6 +43,11 @@ module SparrowAuth
     # the passkey form. See #passkey_sign_in_return_to=.
     PASSKEY_SIGN_IN_RETURN_TO = "sparrow_auth_passkey_sign_in_return_to"
 
+    # Names a passkey somebody's device offered and this application has no
+    # record of, for the sign-in screen's script to tell the device about. See
+    # #sparrow_auth_note_unknown_passkey.
+    UNKNOWN_PASSKEY_COOKIE = "sparrow_auth_unknown_passkey"
+
     PASSKEY_SIGN_IN_JS = File.read(
       File.expand_path("../../javascript/sparrow_auth/passkey_sign_in.js", __dir__)
     ).freeze
@@ -804,6 +809,32 @@ module SparrowAuth
           end
         end
 
+        # A device can keep a passkey long after the site has forgotten it --
+        # deleted on the site, registered against a database that is gone --
+        # and go on offering it, first in every autofill list. Each attempt
+        # fails, and nothing ever tells the device why.
+        #
+        # So when the passkey offered here is one NO account has, a short-lived
+        # cookie names it, and the script on the sign-in screen this request is
+        # redirected to tells the device (WebAuthn's signalUnknownCredential),
+        # which may then remove it. Only for an id with no row at all: a passkey
+        # that exists and fails to verify is a real passkey, and telling the
+        # device to drop it would lock its owner out. The id is public -- the
+        # browser sends it with every attempt -- and the cookie says nothing an
+        # attacker could not already see. It is readable by script on purpose.
+        def sparrow_auth_note_unknown_passkey
+          data = raw_param(webauthn_auth_param)
+          data = JSON.parse(data) if data.is_a?(String)
+          id = data["id"] if data.is_a?(Hash)
+          return unless id.is_a?(String) && id.match?(/\A[A-Za-z0-9_-]{1,1023}\z/)
+          return unless db[webauthn_keys_table].where(webauthn_keys_webauthn_id_column => id).empty?
+
+          ::Rack::Utils.set_cookie_header!(response.headers, SparrowAuth::RodauthMain::UNKNOWN_PASSKEY_COOKIE,
+            value: id, path: "/", max_age: 120, same_site: :lax, secure: request.ssl?)
+        rescue JSON::ParserError
+          nil
+        end
+
         def sparrow_auth_tor_exit?
           SparrowAuth::TorExits.include?(sparrow_auth_remote_ip)
         end
@@ -867,6 +898,7 @@ module SparrowAuth
       # it.
       before_webauthn_login_route do
         @sparrow_auth_passkey_sign_in_return_to = session[SparrowAuth::RodauthMain::PASSKEY_SIGN_IN_RETURN_TO]
+        sparrow_auth_note_unknown_passkey if request.post?
       end
 
       login_redirect do

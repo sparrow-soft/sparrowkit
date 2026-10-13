@@ -104,6 +104,76 @@ RSpec.describe "passkey sign-in", type: :request do
     end
   end
 
+  # A device can keep offering a passkey the site has forgotten. The sign-in
+  # screen's script tells the device (WebAuthn's signalUnknownCredential),
+  # but only for a passkey no account has.
+  describe "a passkey this site has no record of" do
+    def unknown_passkey_cookie
+      Array(response.headers["set-cookie"]).join("\n")[/#{SparrowAuth::RodauthMain::UNKNOWN_PASSKEY_COOKIE}=([^;]*)/o, 1]
+    end
+
+    def offer(client)
+      get "/auth/login"
+      challenge = field_value(response.body, "webauthn_auth_challenge")
+      hmac = field_value(response.body, "webauthn_auth_challenge_hmac")
+      assertion = client.get(challenge: challenge, user_verified: true)
+      post "/auth/webauthn-login", params: {
+        webauthn_auth: assertion.to_json, webauthn_auth_challenge: challenge, webauthn_auth_challenge_hmac: hmac
+      }
+      assertion
+    end
+
+    it "is named in a cookie for the sign-in screen's script" do
+      client = another_authenticator
+      client.create(challenge: SecureRandom.hex(16))
+
+      assertion = offer(client)
+
+      expect(unknown_passkey_cookie).to eq(assertion["id"])
+      expect(response).to redirect_to(SparrowAuth.config.sign_in_path)
+    end
+
+    # A passkey that exists and fails is a real passkey; telling the device to
+    # drop it would lock its owner out.
+    it "is not named when the passkey exists, even if it fails" do
+      post "/auth/create-account", params: {login: email, password: password, "password-confirm": password}
+      url = SparrowMail.deliveries.last.text_body[%r{https?://\S+}]
+      key = URI.decode_www_form(URI.parse(url).query.to_s).to_h["key"]
+      get "/auth/verify-account", params: {key: key}
+      post "/auth/verify-account", params: {key: key}
+      enroll_passkey
+      post "/auth/logout"
+
+      offer(authenticator)
+      expect(unknown_passkey_cookie).to be_nil
+      post "/auth/logout"
+
+      # The same credential, signing a challenge this page never issued.
+      get "/auth/login"
+      challenge = field_value(response.body, "webauthn_auth_challenge")
+      hmac = field_value(response.body, "webauthn_auth_challenge_hmac")
+      assertion = authenticator.get(challenge: Base64.urlsafe_encode64(SecureRandom.bytes(32), padding: false), user_verified: true)
+      post "/auth/webauthn-login", params: {
+        webauthn_auth: assertion.to_json, webauthn_auth_challenge: challenge, webauthn_auth_challenge_hmac: hmac
+      }
+      expect(unknown_passkey_cookie).to be_nil
+      expect(response).to redirect_to(SparrowAuth.config.sign_in_path)
+    end
+
+    it "is not named for something that is not a credential id" do
+      get "/auth/login"
+      post "/auth/webauthn-login", params: {webauthn_auth: {id: "<script>"}.to_json}
+
+      expect(unknown_passkey_cookie).to be_nil
+    end
+
+    it "is told to the device by the sign-in screen's script" do
+      get "/auth/webauthn-autofill-js"
+
+      expect(response.body).to include("signalUnknownCredential", SparrowAuth::RodauthMain::UNKNOWN_PASSKEY_COOKIE)
+    end
+  end
+
   describe "where a passkey sign-in lands" do
     def enrolled_and_signed_out
       post "/auth/create-account", params: {login: email, password: password, "password-confirm": password}

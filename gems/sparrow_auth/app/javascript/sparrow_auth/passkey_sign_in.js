@@ -64,6 +64,21 @@
     form.submit();
   };
 
+  // A passkey the device offered last time and the server had no record of
+  // (see sparrow_auth_note_unknown_passkey in rodauth_main.rb). Tell the
+  // device, which may then stop offering it. Read once, then forgotten.
+  var unknown = (document.cookie.match(/(?:^|;\s*)sparrow_auth_unknown_passkey=([A-Za-z0-9_-]+)/) || [])[1];
+  if (unknown) {
+    document.cookie = "sparrow_auth_unknown_passkey=; Max-Age=0; path=/";
+    if (window.PublicKeyCredential && PublicKeyCredential.signalUnknownCredential) {
+      try {
+        var rpId = JSON.parse(form.getAttribute("data-credential-options")).rpId || location.hostname;
+        Promise.resolve(PublicKeyCredential.signalUnknownCredential({ rpId: rpId, credentialId: unknown }))
+          .catch(function () { /* the device may decline; nothing to do */ });
+      } catch (e) { /* never let this stop passkey sign-in below */ }
+    }
+  }
+
   if (!window.PublicKeyCredential) return;
 
   var pending = null;
