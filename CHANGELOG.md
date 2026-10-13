@@ -14,10 +14,12 @@ released in lockstep at one version.
 - When a passkey sign-in fails because no account has that passkey -- one the
   device kept after the application forgot it -- the sign-in screen's script
   now tells the device (WebAuthn's `signalUnknownCredential`), so it can stop
-  offering a passkey that can never work. The server names the passkey in a
-  short-lived cookie only when it has no record of it at all; a passkey that
-  exists and fails to verify is never reported, so a real one is never
-  removed. Browsers without the call ignore it. No application changes.
+  offering a passkey that can never work. The server keeps the passkey's id in
+  the session only when it has no record of it at all, and the script fetches
+  it once from `<path_prefix>/unknown-passkey`. A passkey that exists and fails
+  to verify is never reported, so a real one is never removed, and nothing but
+  the server's check can name one. Browsers without the call skip it. No
+  application changes.
 
 ## 1.6.1 - 2026-10-13
 

@@ -24,6 +24,17 @@ module SparrowAuth
         response["content-type"] = "text/javascript"
         TURNSTILE_JS
       end
+
+      # The passkey the last sign-in attempt offered that no account has, once,
+      # for the sign-in screen's script to tell the device about. Read from the
+      # session and forgotten. See RodauthMain#sparrow_auth_note_unknown_passkey.
+      r.get "#{SparrowAuth.config.path_prefix.delete_prefix("/")}/unknown-passkey" do
+        id = r.env["rack.session"]&.delete(SparrowAuth::RodauthMain::UNKNOWN_PASSKEY)
+        id = nil unless id.is_a?(String) && id.match?(SparrowAuth::RodauthMain::CREDENTIAL_ID)
+        response["content-type"] = "application/json"
+        response["cache-control"] = "no-store"
+        JSON.generate(credential_id: id)
+      end
     end
   end
 end

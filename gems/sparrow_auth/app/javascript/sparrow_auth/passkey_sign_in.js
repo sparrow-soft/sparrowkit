@@ -27,6 +27,11 @@
 // the person cancelling it. Cancelling (NotAllowedError) is silent, because
 // the email form beside the button is a complete way in either way.
 (function () {
+  // Beside this script, which is served at <prefix>/webauthn-autofill-js.
+  var script = document.currentScript;
+  var ownPath = /webauthn-autofill-js(\?.*)?$/;
+  var unknownPasskeyUrl = script && ownPath.test(script.src) ? script.src.replace(ownPath, "unknown-passkey") : null;
+
   var form = document.getElementById("webauthn-login-form");
   if (!form || form.hasAttribute("data-sparrow-auth-passkey-ready")) return;
   form.setAttribute("data-sparrow-auth-passkey-ready", "");
@@ -65,18 +70,20 @@
   };
 
   // A passkey the device offered last time and the server had no record of
-  // (see sparrow_auth_note_unknown_passkey in rodauth_main.rb). Tell the
-  // device, which may then stop offering it. Read once, then forgotten.
-  var unknown = (document.cookie.match(/(?:^|;\s*)sparrow_auth_unknown_passkey=([A-Za-z0-9_-]+)/) || [])[1];
-  if (unknown) {
-    document.cookie = "sparrow_auth_unknown_passkey=; Max-Age=0; path=/";
-    if (window.PublicKeyCredential && PublicKeyCredential.signalUnknownCredential) {
-      try {
+  // (see sparrow_auth_note_unknown_passkey in rodauth_main.rb): ask the server
+  // for it, once, and tell the device, which may then stop offering it. Asked
+  // of the server rather than read from a cookie, so nothing but the server's
+  // own check can name a passkey here.
+  if (window.PublicKeyCredential && PublicKeyCredential.signalUnknownCredential && unknownPasskeyUrl) {
+    fetch(unknownPasskeyUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (response) { return response.ok ? response.json() : {}; })
+      .then(function (body) {
+        var id = body && body.credential_id;
+        if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,1023}$/.test(id)) return;
         var rpId = JSON.parse(form.getAttribute("data-credential-options")).rpId || location.hostname;
-        Promise.resolve(PublicKeyCredential.signalUnknownCredential({ rpId: rpId, credentialId: unknown }))
-          .catch(function () { /* the device may decline; nothing to do */ });
-      } catch (e) { /* never let this stop passkey sign-in below */ }
-    }
+        return PublicKeyCredential.signalUnknownCredential({ rpId: rpId, credentialId: id });
+      })
+      .catch(function () { /* the device may decline; nothing to do */ });
   }
 
   if (!window.PublicKeyCredential) return;

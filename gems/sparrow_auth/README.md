@@ -341,10 +341,13 @@ lands on `/`, which is wrong for an application whose root is a public home page
 
 A device can keep a passkey after your application has forgotten it -- deleted,
 or registered against a database that is gone -- and go on offering it. When a
-passkey sign-in fails because no account has that passkey at all, the sign-in
-screen's script tells the device (WebAuthn's `signalUnknownCredential`), which
-may then remove it. A passkey that exists and fails is never reported. Nothing
-to do in your application; browsers without the call ignore it.
+passkey sign-in fails because no account has that passkey at all, its id is
+kept in the session, and the sign-in screen's script asks
+`<path_prefix>/unknown-passkey` for it once and tells the device (WebAuthn's
+`signalUnknownCredential`), which may then remove it. A passkey that exists and
+fails is never reported, and nothing but the server's own check can name one
+(a cookie the script could read would be one a sibling subdomain could write).
+Nothing to do in your application; browsers without the call skip it.
 
 **Turnstile.** With `turnstile_site_key` and `turnstile_secret_key` set, check
 every form of yours that sends mail to a typed address -- the sign-in screen and
