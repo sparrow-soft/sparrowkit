@@ -7,6 +7,8 @@ released in lockstep at one version.
 
 ## Unreleased
 
+## 1.6.1 - 2026-10-13
+
 ### Fixed
 
 - A sign-in by passkey always landed on `/`, because Rodauth signs the person
