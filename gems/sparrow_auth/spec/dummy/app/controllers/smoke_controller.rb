@@ -25,6 +25,14 @@ class SmokeController < ActionController::Base
       !session[:passkey_offer_declined]
   end
 
+  # A second sign-in screen, the way an application with two apps behind one
+  # sign-in has one per app, naming where a passkey sign-in from it lands.
+  # Driven by spec/requests/passkey_sign_in_spec.rb.
+  def trade_sign_in
+    rodauth.passkey_sign_in_return_to = params.fetch(:land, "/account-settings")
+    render html: rodauth.render("webauthn-autofill").html_safe, layout: false
+  end
+
   def decline_passkey
     session[:passkey_offer_declined] = true
     redirect_to root_path, notice: "We will not ask again this session"

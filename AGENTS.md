@@ -146,6 +146,8 @@ end
   `current_account.passkey_prompt_due?`; "Not now" is
   `current_account.dismiss_passkey_prompt!`.
 - A refused passkey comes back to `sign_in_path` with `flash[:alert]`.
+- A passkey that works lands on `/` unless the screen's action says where:
+  `rodauth.passkey_sign_in_return_to = dashboard_path`.
 
 ### Tenancy — the part that matters most
 

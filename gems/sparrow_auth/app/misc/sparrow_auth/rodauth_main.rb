@@ -39,6 +39,10 @@ module SparrowAuth
     # the setup page. See before_webauthn_setup_route.
     PASSKEY_RETURN_TO = "sparrow_auth_passkey_return_to"
 
+    # Where a passkey sign-in lands, named by the sign-in screen that rendered
+    # the passkey form. See #passkey_sign_in_return_to=.
+    PASSKEY_SIGN_IN_RETURN_TO = "sparrow_auth_passkey_sign_in_return_to"
+
     PASSKEY_SIGN_IN_JS = File.read(
       File.expand_path("../../javascript/sparrow_auth/passkey_sign_in.js", __dir__)
     ).freeze
@@ -789,6 +793,17 @@ module SparrowAuth
             !path.match?(/[\\\s[:cntrl:]]/)
         end
 
+        # Where the next passkey sign-in from this browser should land. A path
+        # on this site only (see sparrow_auth_local_path?); anything else is
+        # ignored and the sign-in lands on "/". Nil clears it.
+        def passkey_sign_in_return_to=(path)
+          if sparrow_auth_local_path?(path)
+            session[SparrowAuth::RodauthMain::PASSKEY_SIGN_IN_RETURN_TO] = path
+          else
+            session.delete(SparrowAuth::RodauthMain::PASSKEY_SIGN_IN_RETURN_TO)
+          end
+        end
+
         def sparrow_auth_tor_exit?
           SparrowAuth::TorExits.include?(sparrow_auth_remote_ip)
         end
@@ -833,6 +848,30 @@ module SparrowAuth
 
       webauthn_setup_redirect do
         session.delete(SparrowAuth::RodauthMain::PASSKEY_RETURN_TO) || default_redirect
+      end
+
+      # Where a passkey sign-in lands.
+      #
+      # Rodauth sends every sign-in to "/", which is right for an application
+      # whose root sends a signed-in person into the app and wrong for one whose
+      # root is a public home page, or that has more than one app behind one
+      # sign-in. The emailed-code flow never had this problem, because the
+      # application's own controller redirects after it. A passkey is signed in
+      # by Rodauth, so the screen that rendered the passkey form says where to
+      # go, before the person picks a passkey:
+      #
+      #   rodauth.passkey_sign_in_return_to = taste_root_path
+      #
+      # Read before Rodauth signs the person in, because signing in clears the
+      # session -- its defence against session fixation -- and the value with
+      # it.
+      before_webauthn_login_route do
+        @sparrow_auth_passkey_sign_in_return_to = session[SparrowAuth::RodauthMain::PASSKEY_SIGN_IN_RETURN_TO]
+      end
+
+      login_redirect do
+        destination = @sparrow_auth_passkey_sign_in_return_to
+        sparrow_auth_local_path?(destination) ? destination : default_redirect
       end
 
       # A passkey that did not work goes back to the sign-in screen the person
