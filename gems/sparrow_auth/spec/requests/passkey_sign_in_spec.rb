@@ -104,6 +104,84 @@ RSpec.describe "passkey sign-in", type: :request do
     end
   end
 
+  # A device can keep offering a passkey the site has forgotten. The sign-in
+  # screen's script asks the server for it once and tells the device
+  # (WebAuthn's signalUnknownCredential) -- but only for a passkey no account
+  # has, and only one the server itself recorded.
+  describe "a passkey this site has no record of" do
+    def unknown_passkey
+      get "#{SparrowAuth.config.path_prefix}/unknown-passkey"
+      expect(response.media_type).to eq("application/json")
+      expect(response.headers["cache-control"]).to include("no-store")
+      JSON.parse(response.body)["credential_id"]
+    end
+
+    def offer(client, challenge: nil)
+      get "/auth/login"
+      issued = field_value(response.body, "webauthn_auth_challenge")
+      hmac = field_value(response.body, "webauthn_auth_challenge_hmac")
+      assertion = client.get(challenge: challenge || issued, user_verified: true)
+      post "/auth/webauthn-login", params: {
+        webauthn_auth: assertion.to_json, webauthn_auth_challenge: issued, webauthn_auth_challenge_hmac: hmac
+      }
+      assertion
+    end
+
+    it "is handed to the sign-in screen's script once, then forgotten" do
+      client = another_authenticator
+      client.create(challenge: SecureRandom.hex(16))
+
+      assertion = offer(client)
+
+      expect(response).to redirect_to(SparrowAuth.config.sign_in_path)
+      expect(unknown_passkey).to eq(assertion["id"])
+      expect(unknown_passkey).to be_nil
+    end
+
+    # A passkey that exists and fails is a real passkey; telling the device to
+    # drop it would lock its owner out.
+    it "is never a passkey that exists, whether it works or fails" do
+      post "/auth/create-account", params: {login: email, password: password, "password-confirm": password}
+      url = SparrowMail.deliveries.last.text_body[%r{https?://\S+}]
+      key = URI.decode_www_form(URI.parse(url).query.to_s).to_h["key"]
+      get "/auth/verify-account", params: {key: key}
+      post "/auth/verify-account", params: {key: key}
+      enroll_passkey
+      post "/auth/logout"
+
+      offer(authenticator)
+      expect(unknown_passkey).to be_nil
+      post "/auth/logout"
+
+      # The same credential, signing a challenge this page never issued.
+      offer(authenticator, challenge: Base64.urlsafe_encode64(SecureRandom.bytes(32), padding: false))
+      expect(response).to redirect_to(SparrowAuth.config.sign_in_path)
+      expect(unknown_passkey).to be_nil
+    end
+
+    it "is never something that is not a credential id" do
+      get "/auth/login"
+      post "/auth/webauthn-login", params: {webauthn_auth: {id: "<script>"}.to_json}
+
+      expect(unknown_passkey).to be_nil
+    end
+
+    # The script trusts only what the server recorded. A cookie it could read
+    # is one a sibling subdomain could write, naming a real passkey.
+    it "cannot be planted with a cookie" do
+      cookies[SparrowAuth::RodauthMain::UNKNOWN_PASSKEY] = "AAAAAAAAAAAAAAAAAAAAAA"
+
+      expect(unknown_passkey).to be_nil
+    end
+
+    it "is asked for, and told to the device, by the sign-in screen's script" do
+      get "/auth/webauthn-autofill-js"
+
+      expect(response.body).to include("signalUnknownCredential", "unknown-passkey")
+      expect(response.body).not_to include("document.cookie")
+    end
+  end
+
   describe "where a passkey sign-in lands" do
     def enrolled_and_signed_out
       post "/auth/create-account", params: {login: email, password: password, "password-confirm": password}

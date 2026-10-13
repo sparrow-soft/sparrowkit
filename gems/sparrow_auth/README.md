@@ -49,7 +49,7 @@ and cannot be signed in.
 # Not on RubyGems yet, and the gems pin each other to an exact version, so they
 # come from the repository in one `git` block. The glob lets Bundler resolve
 # sparrow_mail from the same source, which sparrow_auth requires.
-git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.6.1", glob: "gems/*/*.gemspec" do
+git "https://github.com/sparrow-soft/sparrowkit.git", tag: "v1.6.2", glob: "gems/*/*.gemspec" do
   gem "sparrow_auth"
 end
 ```
@@ -338,6 +338,16 @@ end
 
 Only a path on your own site is accepted. Without it, a sign-in by passkey
 lands on `/`, which is wrong for an application whose root is a public home page.
+
+A device can keep a passkey after your application has forgotten it -- deleted,
+or registered against a database that is gone -- and go on offering it. When a
+passkey sign-in fails because no account has that passkey at all, its id is
+kept in the session, and the sign-in screen's script asks
+`<path_prefix>/unknown-passkey` for it once and tells the device (WebAuthn's
+`signalUnknownCredential`), which may then remove it. A passkey that exists and
+fails is never reported, and nothing but the server's own check can name one
+(a cookie the script could read would be one a sibling subdomain could write).
+Nothing to do in your application; browsers without the call skip it.
 
 **Turnstile.** With `turnstile_site_key` and `turnstile_secret_key` set, check
 every form of yours that sends mail to a typed address -- the sign-in screen and
