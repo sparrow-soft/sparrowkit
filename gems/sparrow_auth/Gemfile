@@ -29,7 +29,7 @@ group :development, :test, :smoke do
   # The dummy application the engine mounts into runs a real Rails stack against
   # a real Postgres. An auth engine tested against anything less is testing a
   # different thing than it ships.
-  gem "puma", "~> 6.0"
+  gem "puma", "~> 8.0"
 
   # Social sign-in is opt-in for a host application, so these are deliberately
   # not runtime dependencies of the gem. An application that wants Google or
