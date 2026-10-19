@@ -41,7 +41,7 @@ group :development, :test, :smoke do
   # flow against a test strategy.
   gem "rodauth-omniauth", "~> 0.6"
   gem "omniauth", "~> 2.1"
-  gem "omniauth-rails_csrf_protection", "~> 1.0"
+  gem "omniauth-rails_csrf_protection", "~> 2.0"
 
   # The smoke harness and mailbox render the generated SparrowKit theme. Test
   # tooling only -- never a runtime dependency of the engine, which ships
