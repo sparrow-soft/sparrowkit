@@ -3,8 +3,8 @@
   "private": true,
   "description": "Build-time only. Tailwind compiles tailwind/console.css into the committed app/assets/stylesheets/sparrow_ui/console.css. Consumers install a gem and never see this; nothing here ships in the gemspec's files list.",
   "devDependencies": {
-    "@tailwindcss/cli": "^4",
-    "tailwindcss": "^4"
+    "@tailwindcss/cli": "^4.3.5",
+    "tailwindcss": "^4.3.5"
   },
   "scripts": {
     "build": "tailwindcss -i tailwind/console.css -o app/assets/stylesheets/sparrow_ui/console.css --minify"
